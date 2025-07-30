@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Hex Grid Map P2P</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
   <!-- PeerJS for P2P connections -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
@@ -51,6 +50,9 @@
       text-align: center;
       margin-bottom: 20px;
     }
+    #sessionCodeInput {
+      padding: 5px;
+    }
   </style>
 </head>
 <body>
@@ -68,31 +70,28 @@
 
 <script>
   // ----------------------------
-  // P2P Connection with PeerJS
+  // PeerJS P2P Setup
   // ----------------------------
   let peer = null;
   let connections = [];
-  let edgesMap = {}; // EdgeID -> edge element
+  let edgesMap = {};
+  let peerReady = false;
 
-  function setupPeer() {
-    peer = new Peer(); // Generates random ID
+  function initPeer() {
+    peer = new Peer(); // generate random ID
     peer.on('open', (id) => {
-      document.getElementById('sessionInfo').textContent = `Your Session Code: ${id}`;
+      peerReady = true;
+      console.log("PeerJS ready with ID:", id);
     });
 
+    // When someone connects to us
     peer.on('connection', (conn) => {
       connections.push(conn);
       conn.on('data', handleIncomingData);
     });
   }
 
-  function connectToPeer(code) {
-    const conn = peer.connect(code);
-    conn.on('open', () => {
-      connections.push(conn);
-    });
-    conn.on('data', handleIncomingData);
-  }
+  initPeer();
 
   function broadcast(data) {
     connections.forEach(conn => conn.send(data));
@@ -109,7 +108,28 @@
   }
 
   // ----------------------------
-  // SVG setup (same as before)
+  // Session Controls
+  // ----------------------------
+  document.getElementById('createSessionBtn').addEventListener('click', () => {
+    if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
+    document.getElementById('sessionInfo').textContent = `Your Session Code: ${peer.id}`;
+  });
+
+  document.getElementById('joinSessionBtn').addEventListener('click', () => {
+    const code = document.getElementById('sessionCodeInput').value.trim();
+    if (!code) return alert("Enter a session code!");
+    if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
+
+    const conn = peer.connect(code);
+    conn.on('open', () => {
+      connections.push(conn);
+      document.getElementById('sessionInfo').textContent = `Connected to session: ${code}`;
+    });
+    conn.on('data', handleIncomingData);
+  });
+
+  // ----------------------------
+  // Hex Grid Drawing
   // ----------------------------
   const svg = document.getElementById('hexMap');
   const size = 60;
@@ -214,11 +234,7 @@
 
       circle.addEventListener('click', () => {
         const currentStroke = circle.getAttribute("stroke");
-        if (currentStroke === "transparent" || currentStroke === null) {
-          circle.setAttribute("stroke", "black");
-        } else {
-          circle.setAttribute("stroke", "transparent");
-        }
+        circle.setAttribute("stroke", currentStroke === "transparent" ? "black" : "transparent");
       });
 
       svg.appendChild(circle);
@@ -236,17 +252,6 @@
       createHex(x, y, label);
     }
   }
-
-  // ----------------------------
-  // Session Controls
-  // ----------------------------
-  document.getElementById('createSessionBtn').addEventListener('click', setupPeer);
-
-  document.getElementById('joinSessionBtn').addEventListener('click', () => {
-    if (!peer) setupPeer(); // if peer not created yet
-    const code = document.getElementById('sessionCodeInput').value;
-    if (code) connectToPeer(code);
-  });
 
   // PDF Export (unchanged)
   document.getElementById('printBtn').addEventListener('click', () => {
