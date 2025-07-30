@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Hex Grid Map with Circles and PDF Export</title>
+  <title>Hex Grid Map P2P</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <!-- PeerJS for P2P connections -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     body {
       background: #f9f9f9;
@@ -44,42 +47,92 @@
     #printBtn:hover {
       background: #45a049;
     }
+    #sessionControls {
+      text-align: center;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
 
-<h2>Hex Grid Map</h2>
+<h2>Hex Grid Map P2P</h2>
+<div id="sessionControls">
+  <button id="createSessionBtn">Create Session</button>
+  <input id="sessionCodeInput" placeholder="Enter Session Code">
+  <button id="joinSessionBtn">Join Session</button>
+  <p id="sessionInfo"></p>
+</div>
+
 <button id="printBtn">Print / Export PDF</button>
 <svg id="hexMap"></svg>
 
 <script>
+  // ----------------------------
+  // P2P Connection with PeerJS
+  // ----------------------------
+  let peer = null;
+  let connections = [];
+  let edgesMap = {}; // EdgeID -> edge element
+
+  function setupPeer() {
+    peer = new Peer(); // Generates random ID
+    peer.on('open', (id) => {
+      document.getElementById('sessionInfo').textContent = `Your Session Code: ${id}`;
+    });
+
+    peer.on('connection', (conn) => {
+      connections.push(conn);
+      conn.on('data', handleIncomingData);
+    });
+  }
+
+  function connectToPeer(code) {
+    const conn = peer.connect(code);
+    conn.on('open', () => {
+      connections.push(conn);
+    });
+    conn.on('data', handleIncomingData);
+  }
+
+  function broadcast(data) {
+    connections.forEach(conn => conn.send(data));
+  }
+
+  function handleIncomingData(data) {
+    if (data.type === "toggleEdge") {
+      const edge = edgesMap[data.edgeId];
+      if (edge) {
+        const newWidth = edge.getAttribute("stroke-width") === "2" ? "6" : "2";
+        edge.setAttribute("stroke-width", newWidth);
+      }
+    }
+  }
+
+  // ----------------------------
+  // SVG setup (same as before)
+  // ----------------------------
   const svg = document.getElementById('hexMap');
-  const size = 60; // radius of hexagon
-  const marginInches = 0.5; // margin around page
+  const size = 60;
+  const marginInches = 0.5;
   const pageWidthIn = 8.5;
   const pageHeightIn = 11;
-  const dpi = 96; // typical screen resolution
+  const dpi = 96;
 
-  // Convert margins and page size to pixels
   const marginPx = marginInches * dpi;
   const pageWidthPx = pageWidthIn * dpi;
   const pageHeightPx = pageHeightIn * dpi;
 
-  // Effective drawing area (minus margins)
   const drawWidth = pageWidthPx - 2 * marginPx;
   const drawHeight = pageHeightPx - 2 * marginPx;
 
-  // Hex math (pointy-topped)
   const hexWidth = Math.sqrt(3) * size;
   const hexHeight = 2 * size;
   const horizDist = hexWidth;
   const vertDist = 0.75 * hexHeight;
 
-  // Determine max rows/cols that fit
   const cols = Math.floor(drawWidth / horizDist);
   const rows = Math.floor(drawHeight / vertDist);
 
-  // Set SVG size
   const svgWidth = cols * horizDist + hexWidth;
   const svgHeight = rows * vertDist + hexHeight;
   svg.setAttribute('width', svgWidth);
@@ -94,12 +147,10 @@
       points.push({ x: px, y: py });
     }
 
-    // Draw edges with individual click handlers
     for (let i = 0; i < 6; i++) {
       const start = points[i];
       const end = points[(i + 1) % 6];
 
-      // Visible edge
       const edge = document.createElementNS("http://www.w3.org/2000/svg", "line");
       edge.setAttribute("x1", start.x);
       edge.setAttribute("y1", start.y);
@@ -107,6 +158,11 @@
       edge.setAttribute("y2", end.y);
       edge.setAttribute("stroke", "#333");
       edge.setAttribute("stroke-width", "2");
+
+      const edgeId = `${label}-edge-${i}`;
+      edge.dataset.edgeId = edgeId;
+      edgesMap[edgeId] = edge;
+
       svg.appendChild(edge);
 
       // Clickable hitbox
@@ -120,58 +176,58 @@
       hitbox.style.cursor = "pointer";
 
       hitbox.addEventListener('click', () => {
-        // Toggle stroke width on this edge only
-        const currentWidth = edge.getAttribute("stroke-width");
-        edge.setAttribute("stroke-width", currentWidth === "2" ? "6" : "2");
+        const newWidth = edge.getAttribute("stroke-width") === "2" ? "6" : "2";
+        edge.setAttribute("stroke-width", newWidth);
+
+        // Send to peers
+        broadcast({ type: "toggleEdge", edgeId });
       });
 
       svg.appendChild(hitbox);
     }
 
-    // Add small gray label in corner
+    // Label
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.8);
     text.setAttribute("y", y - size * 0.8);
     text.textContent = label;
     svg.appendChild(text);
 
-  // Add 5 small circles arranged in a circular pattern
-const circleColors = ['#add8e6', '#add8e6', '#add8e6', '#f08080', '#90ee90'];
-const circleRadius = 22; // radius of circle layout inside hex
-const circleCount = circleColors.length;
+    // Circles (local only)
+    const circleColors = ['#add8e6', '#add8e6', '#add8e6', '#f08080', '#90ee90'];
+    const circleRadius = 22;
+    const circleCount = circleColors.length;
 
-circleColors.forEach((color, index) => {
-  const angle = (2 * Math.PI / circleCount) * index - Math.PI / 2; // start at top (270°)
-  const cx = x + circleRadius * Math.cos(angle);
-  const cy = y + circleRadius * Math.sin(angle);
+    circleColors.forEach((color, index) => {
+      const angle = (2 * Math.PI / circleCount) * index - Math.PI / 2;
+      const cx = x + circleRadius * Math.cos(angle);
+      const cy = y + circleRadius * Math.sin(angle);
 
-  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  circle.setAttribute("cx", cx);
-  circle.setAttribute("cy", cy);
-  circle.setAttribute("r", 6);
-  circle.setAttribute("fill", color);
-  circle.setAttribute("stroke", "transparent");
-  circle.setAttribute("stroke-width", "3");
-  circle.style.cursor = "pointer";
-
-  circle.addEventListener('click', () => {
-    const currentStroke = circle.getAttribute("stroke");
-    if (currentStroke === "transparent" || currentStroke === null) {
-      circle.setAttribute("stroke", "black");
-      circle.setAttribute("stroke-width", "3");
-    } else {
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", cx);
+      circle.setAttribute("cy", cy);
+      circle.setAttribute("r", 6);
+      circle.setAttribute("fill", color);
       circle.setAttribute("stroke", "transparent");
       circle.setAttribute("stroke-width", "3");
-    }
-  });
+      circle.style.cursor = "pointer";
 
-  svg.appendChild(circle);
-});
+      circle.addEventListener('click', () => {
+        const currentStroke = circle.getAttribute("stroke");
+        if (currentStroke === "transparent" || currentStroke === null) {
+          circle.setAttribute("stroke", "black");
+        } else {
+          circle.setAttribute("stroke", "transparent");
+        }
+      });
+
+      svg.appendChild(circle);
+    });
   }
 
-  // Generate labels: A1, B1, etc.
+  // Generate grid
   for (let row = 0; row < rows; row++) {
-    const rowLetter = String.fromCharCode(65 + (row % 26)); // A-Z
+    const rowLetter = String.fromCharCode(65 + (row % 26));
     for (let col = 0; col < cols; col++) {
       const xOffset = (row % 2 === 0) ? 0 : horizDist / 2;
       const x = col * horizDist + xOffset + size;
@@ -181,14 +237,23 @@ circleColors.forEach((color, index) => {
     }
   }
 
-  // Export to PDF
+  // ----------------------------
+  // Session Controls
+  // ----------------------------
+  document.getElementById('createSessionBtn').addEventListener('click', setupPeer);
+
+  document.getElementById('joinSessionBtn').addEventListener('click', () => {
+    if (!peer) setupPeer(); // if peer not created yet
+    const code = document.getElementById('sessionCodeInput').value;
+    if (code) connectToPeer(code);
+  });
+
+  // PDF Export (unchanged)
   document.getElementById('printBtn').addEventListener('click', () => {
     const { jsPDF } = window.jspdf;
-
     const svgData = new XMLSerializer().serializeToString(svg);
     const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(svgBlob);
-
     const img = new Image();
     img.onload = function() {
       const canvas = document.createElement("canvas");
@@ -196,30 +261,20 @@ circleColors.forEach((color, index) => {
       canvas.width = svg.clientWidth;
       canvas.height = svg.clientHeight;
       ctx.drawImage(img, 0, 0);
-
       const imgData = canvas.toDataURL("image/png");
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'in',
-        format: 'letter'
-      });
-
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'in', format: 'letter' });
       const pageWidth = 8.5;
       const pageHeight = 11;
       const margin = 0.5;
       const usableWidth = pageWidth - 2 * margin;
       const usableHeight = pageHeight - 2 * margin;
-
       const imgWidth = canvas.width / dpi;
       const imgHeight = canvas.height / dpi;
       let scale = Math.min(usableWidth / imgWidth, usableHeight / imgHeight);
-
       const finalWidth = imgWidth * scale;
       const finalHeight = imgHeight * scale;
       const xOffset = (pageWidth - finalWidth) / 2;
       const yOffset = (pageHeight - finalHeight) / 2;
-
       pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
       pdf.save('hex-grid.pdf');
       URL.revokeObjectURL(url);
@@ -227,6 +282,5 @@ circleColors.forEach((color, index) => {
     img.src = url;
   });
 </script>
-
 </body>
 </html>
