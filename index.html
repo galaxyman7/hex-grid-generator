@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Hex Grid Map P2P</title>
+  <title>Hex Grid Map P2P Sync</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- PeerJS for P2P connections -->
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -57,7 +57,7 @@
 </head>
 <body>
 
-<h2>Hex Grid Map P2P</h2>
+<h2>Hex Grid Map P2P Sync</h2>
 <div id="sessionControls">
   <button id="createSessionBtn">Create Session</button>
   <input id="sessionCodeInput" placeholder="Enter Session Code">
@@ -70,15 +70,16 @@
 
 <script>
   // ----------------------------
-  // PeerJS P2P Setup
+  // PeerJS P2P Setup with Sync
   // ----------------------------
   let peer = null;
   let connections = [];
-  let edgesMap = {};
+  let edgesMap = {};     // edgeId -> SVG line element
+  let edgeStates = {};   // edgeId -> boolean highlighted?
   let peerReady = false;
 
   function initPeer() {
-    peer = new Peer(); // generate random ID
+    peer = new Peer(); // Generate random ID
     peer.on('open', (id) => {
       peerReady = true;
       console.log("PeerJS ready with ID:", id);
@@ -88,6 +89,9 @@
     peer.on('connection', (conn) => {
       connections.push(conn);
       conn.on('data', handleIncomingData);
+
+      // Send current edge state to new peer immediately
+      conn.send({ type: "syncState", states: edgeStates });
     });
   }
 
@@ -98,11 +102,24 @@
   }
 
   function handleIncomingData(data) {
+    // Handle single toggle events
     if (data.type === "toggleEdge") {
       const edge = edgesMap[data.edgeId];
       if (edge) {
-        const newWidth = edge.getAttribute("stroke-width") === "2" ? "6" : "2";
-        edge.setAttribute("stroke-width", newWidth);
+        edge.setAttribute("stroke-width", data.highlighted ? "6" : "2");
+        edgeStates[data.edgeId] = data.highlighted;
+      }
+    }
+
+    // Handle full sync from host
+    if (data.type === "syncState") {
+      for (const edgeId in data.states) {
+        const edge = edgesMap[edgeId];
+        if (edge) {
+          const highlighted = data.states[edgeId];
+          edge.setAttribute("stroke-width", highlighted ? "6" : "2");
+          edgeStates[edgeId] = highlighted;
+        }
       }
     }
   }
@@ -182,6 +199,7 @@
       const edgeId = `${label}-edge-${i}`;
       edge.dataset.edgeId = edgeId;
       edgesMap[edgeId] = edge;
+      edgeStates[edgeId] = false; // default unhighlighted
 
       svg.appendChild(edge);
 
@@ -196,11 +214,13 @@
       hitbox.style.cursor = "pointer";
 
       hitbox.addEventListener('click', () => {
-        const newWidth = edge.getAttribute("stroke-width") === "2" ? "6" : "2";
-        edge.setAttribute("stroke-width", newWidth);
+        const isHighlighted = edge.getAttribute("stroke-width") === "6";
+        const newHighlighted = !isHighlighted;
+        edge.setAttribute("stroke-width", newHighlighted ? "6" : "2");
+        edgeStates[edgeId] = newHighlighted;
 
-        // Send to peers
-        broadcast({ type: "toggleEdge", edgeId });
+        // Broadcast new state
+        broadcast({ type: "toggleEdge", edgeId, highlighted: newHighlighted });
       });
 
       svg.appendChild(hitbox);
