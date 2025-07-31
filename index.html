@@ -16,30 +16,23 @@
       flex-direction: column;
       align-items: center;
     }
-    h2 {
-      text-align: center;
-    }
+    h2 { text-align: center; }
     svg {
       display: block;
       margin: 0 auto 20px auto;
       background: #eef;
     }
     text {
-      font-size: 12px;   /* bigger labels */
+      font-size: 12px;
       fill: gray;
       text-anchor: start;
       dominant-baseline: hanging;
       pointer-events: none;
     }
-    line {
-      cursor: pointer;
-    }
+    line { cursor: pointer; }
     #sessionControls {
       text-align: center;
       margin-bottom: 20px;
-    }
-    #sessionCodeInput {
-      padding: 5px;
     }
     #searchToggle {
       display: block;
@@ -52,9 +45,7 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #searchToggle.active {
-      background: #2a8;
-    }
+    #searchToggle.active { background: #2a8; }
     #printBtn, #saveBtn, #loadBtn {
       display: block;
       margin: 10px auto;
@@ -66,7 +57,7 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    /* Floating message with slide/fade animation */
+    /* Floating message animation */
     #message {
       position: fixed;
       bottom: 60px;
@@ -83,32 +74,14 @@
     #message.show {
       animation: slideFade 2s ease forwards;
     }
-    #message.found {
-      background: rgba(0, 128, 0, 0.85);
-    }
-    #message.nothing {
-      background: rgba(200, 0, 0, 0.85);
-    }
-    #message.collision {
-      background: rgba(255, 140, 0, 0.85);
-    }
+    #message.found { background: rgba(0, 128, 0, 0.85); }
+    #message.nothing { background: rgba(200, 0, 0, 0.85); }
+    #message.collision { background: rgba(255, 140, 0, 0.85); }
     @keyframes slideFade {
-      0% {
-        opacity: 0;
-        transform: translate(-50%, 0);
-      }
-      10% {
-        opacity: 1;
-        transform: translate(-50%, 10px);
-      }
-      80% {
-        opacity: 1;
-        transform: translate(-50%, 20px);
-      }
-      100% {
-        opacity: 0;
-        transform: translate(-50%, 40px);
-      }
+      0% { opacity: 0; transform: translate(-50%, 0); }
+      10% { opacity: 1; transform: translate(-50%, 10px); }
+      80% { opacity: 1; transform: translate(-50%, 20px); }
+      100% { opacity: 0; transform: translate(-50%, 40px); }
     }
   </style>
 </head>
@@ -136,25 +109,23 @@
 <script>
   let peer = null;
   let connections = [];
-  let edgesMap = {};     
-  let edgeStates = {};   
+  let edgesMap = {};
+  let edgeStates = {}; 
 
-  // Split circle states:
-  let hostCircleStates = {};  // host's highlights
-  let guestCircleStates = {}; // guests' highlights
-  let myCircleStates = {};    // this player's own highlights
+  // Separate circle states
+  let hostCircleStates = {};   // Host highlights
+  let guestCircleStates = {};  // Guest highlights (shared)
+  let myCircleStates = {};     // My own highlights
 
   let peerReady = false;
   let searchMode = false;
   let isHost = false;
 
-  // Generate short session code
+  // Generate session code
   function generateShortCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
     return code;
   }
 
@@ -169,41 +140,22 @@
     peer.on('connection', (conn) => {
       connections.push(conn);
       conn.on('data', handleIncomingData);
-      // Send current full state to joining guest (host sends all data)
-      if (isHost) {
-        conn.send({ 
-          type: "syncAll", 
-          edges: edgeStates, 
-          hostCircles: hostCircleStates, 
-          guestCircles: guestCircleStates 
-        });
-      }
+      // Send full state to joining guest
+      conn.send({ type: "syncAll", edges: edgeStates, hostCircles: hostCircleStates, guestCircles: guestCircleStates });
     });
   }
 
   initPeer();
 
   function broadcast(data) {
-    connections.forEach(conn => {
-      if (conn.open) {
-        conn.send(data);
-      }
-    });
+    connections.forEach(conn => conn.send(data));
   }
 
   function handleIncomingData(data) {
     if (data.type === "syncAll") {
-      // Full sync for new guest
       edgeStates = data.edges;
-
-      if (isHost) {
-        // Host receives guests' highlights
-        guestCircleStates = data.guestCircles || {};
-      } else {
-        // Guests receive host and guest highlights
-        hostCircleStates = data.hostCircles || {};
-        guestCircleStates = data.guestCircles || {};
-      }
+      hostCircleStates = data.hostCircles || {};
+      guestCircleStates = data.guestCircles || {};
       updateEdgesUI();
       updateCirclesUI();
     }
@@ -211,13 +163,13 @@
       edgeStates[data.edgeId] = data.highlighted;
       updateEdgesUI();
     }
-    if (data.type === "toggleHostCircle") {
+    if (data.type === "toggleCircleHost") {
       hostCircleStates[data.circleId] = data.highlighted;
-      if (!isHost) updateCirclesUI();
+      updateCirclesUI();
     }
-    if (data.type === "toggleGuestCircle") {
+    if (data.type === "toggleCircleGuest") {
       guestCircleStates[data.circleId] = data.highlighted;
-      if (!isHost) updateCirclesUI();
+      updateCirclesUI();
     }
   }
 
@@ -228,34 +180,32 @@
   }
 
   function updateCirclesUI() {
-    if (isHost) {
-      // Host sees all circles (host + guests)
+    // Guests see guest highlights (not host)
+    if (!isHost) {
       for (const circleId in myCircleStates) {
         const circleEl = document.getElementById(circleId);
-        const highlight = (hostCircleStates[circleId] || guestCircleStates[circleId]) || false;
+        const highlight = guestCircleStates[circleId] || false;
         circleEl.setAttribute("stroke", highlight ? "black" : "transparent");
       }
     } else {
-      // Guests see only other guests' highlights + their own, NOT host highlights
+      // Host sees only host highlights
       for (const circleId in myCircleStates) {
         const circleEl = document.getElementById(circleId);
-        const isOwn = myCircleStates[circleId];
-        const isGuestHighlighted = guestCircleStates[circleId] || false;
-        const highlight = isOwn || isGuestHighlighted;
+        const highlight = hostCircleStates[circleId] || false;
         circleEl.setAttribute("stroke", highlight ? "black" : "transparent");
       }
     }
   }
 
-  // Floating message
   function showMessage(text, type) {
     const messageDiv = document.getElementById('message');
     messageDiv.textContent = text;
-    messageDiv.className = ''; // reset classes
+    messageDiv.className = '';
     messageDiv.classList.add('show', type);
     setTimeout(() => messageDiv.classList.remove('show', type), 2000);
   }
 
+  // Create / join session
   document.getElementById('createSessionBtn').addEventListener('click', () => {
     if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
     isHost = true;
@@ -273,9 +223,6 @@
     conn.on('open', () => {
       connections.push(conn);
       document.getElementById('sessionInfo').textContent = `Connected to session: ${code}`;
-
-      // Send guest's current highlights to host when connected
-      // (initially empty, but you can implement sending on toggle)
     });
     conn.on('data', handleIncomingData);
   });
@@ -317,7 +264,7 @@
       points.push({ x: px, y: py });
     }
 
-    // Outer edges
+    // Draw edges
     for (let i = 0; i < 6; i++) {
       const start = points[i];
       const end = points[(i + 1) % 6];
@@ -355,16 +302,16 @@
       svg.appendChild(hitbox);
     }
 
-    // Label position (lower + right offset to avoid circle)
+    // Label
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.4);
     text.setAttribute("y", y - size * 0.4);
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circle positions: rotated pentagon 72° CCW
+    // Circles
     const circleColors = ['#add8e6','#add8e6','#add8e6','#90ee90','#f08080'];
-    const angleOffset = -Math.PI/2 + (72 * Math.PI/180); // rotate 72° CCW
+    const angleOffset = -Math.PI/2 + (72 * Math.PI/180);
     const radius = 25;
 
     circleColors.forEach((color, index) => {
@@ -386,36 +333,44 @@
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          // Guests searching: found if highlighted by host OR by other guests (excluding self)
-const isHighlightedByHost = hostCircleStates[circleId] || false;
-const isHighlightedByGuest = guestCircleStates[circleId] || false;
-const isOwn = myCircleStates[circleId] || false;
+          const isHighlightedByHost = hostCircleStates[circleId] || false;
+          const isHighlightedByGuest = guestCircleStates[circleId] || false;
+          const isOwn = myCircleStates[circleId] || false;
 
-if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
-  showMessage("Found!", "found");
-} else {
-  showMessage("Nothing Found", "nothing");
-}
+          if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
+            showMessage("Found!", "found");
+          } else {
+            showMessage("Nothing Found", "nothing");
+          }
         } else {
-          const isHighlighted = circle.getAttribute("stroke") === "black";
+          // Placement mode
+          const isHighlighted = circle.getAttribute("stroke") === "black" || circle.getAttribute("stroke") === "red";
           const newHighlighted = !isHighlighted;
 
+          // Host highlights
           if (isHost) {
-            circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
             hostCircleStates[circleId] = newHighlighted;
-            broadcast({ type: "toggleHostCircle", circleId, highlighted: newHighlighted });
-          } else {
             circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
-            guestCircleStates[circleId] = newHighlighted;
-            broadcast({ type: "toggleGuestCircle", circleId, highlighted: newHighlighted });
+            broadcast({ type: "toggleCircleHost", circleId, highlighted: newHighlighted });
 
-            // Collision: guest clicked a circle that host also has highlighted
+            // Collision: if guest already highlighted
+            if (newHighlighted && guestCircleStates[circleId]) {
+              circle.setAttribute("stroke", "red");
+              showMessage("Collision!", "collision");
+            }
+          } else {
+            // Guest highlights
+            myCircleStates[circleId] = newHighlighted;
+            guestCircleStates[circleId] = newHighlighted;
+            circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
+            broadcast({ type: "toggleCircleGuest", circleId, highlighted: newHighlighted });
+
+            // Collision: if host already highlighted
             if (newHighlighted && hostCircleStates[circleId]) {
+              circle.setAttribute("stroke", "red");
               showMessage("Collision!", "collision");
             }
           }
-
-          myCircleStates[circleId] = newHighlighted;
         }
       });
 
@@ -446,7 +401,7 @@ if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
   // Host Save/Load
   document.getElementById('saveBtn').addEventListener('click', () => {
     if (!isHost) return;
-    const data = JSON.stringify({ edges: edgeStates, hostCircles: hostCircleStates, guestCircles: guestCircleStates });
+    const data = JSON.stringify({ edges: edgeStates, hostCircles: hostCircleStates });
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -466,9 +421,9 @@ if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
       const reader = new FileReader();
       reader.onload = () => {
         const data = JSON.parse(reader.result);
-        edgeStates = data.edges || {};
+        edgeStates = data.edges;
         hostCircleStates = data.hostCircles || {};
-        guestCircleStates = data.guestCircles || {};
+        guestCircleStates = {}; // reset so host doesn't see guests
         updateEdgesUI();
         updateCirclesUI();
         broadcast({ type: "syncAll", edges: edgeStates, hostCircles: hostCircleStates, guestCircles: guestCircleStates });
@@ -504,7 +459,6 @@ if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
     };
     img.src = url;
   });
-
 </script>
 </body>
 </html>
