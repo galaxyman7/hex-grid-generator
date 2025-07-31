@@ -24,13 +24,13 @@
       margin: 0 auto 20px auto;
       background: #eef;
     }
-text {
-  font-size: 12px;   /* Bigger labels */
-  fill: gray;
-  text-anchor: start;
-  dominant-baseline: hanging;
-  pointer-events: none;
-}
+    text {
+      font-size: 8px;
+      fill: gray;
+      text-anchor: start;
+      dominant-baseline: hanging;
+      pointer-events: none;
+    }
     line {
       cursor: pointer;
     }
@@ -293,56 +293,21 @@ text {
       svg.appendChild(hitbox);
     }
 
-// Label moved downward to avoid top circle overlap
-const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-text.setAttribute("x", x - size * 0.5);
-text.setAttribute("y", y - size * 0.4);  // lower position
-text.textContent = label;
-svg.appendChild(text);
+    // Label slightly higher to avoid overlap
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("x", x - size * 0.6);
+    text.setAttribute("y", y - size * 0.7);
+    text.textContent = label;
+    svg.appendChild(text);
 
-    // Arrange 5 circles in a pentagon (top 3 = blue, bottom-left = green, bottom-right = red)
-const radius = 25;
-const colors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080']; 
-// Order: top-left blue, top-center blue, top-right blue, bottom-left green, bottom-right red
-
-for (let i = 0; i < 5; i++) {
-  const angle = -Math.PI / 2 + (2 * Math.PI / 5) * i; // starts at top center
-  const cx = x + radius * Math.cos(angle);
-  const cy = y + radius * Math.sin(angle);
-
-  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  circle.setAttribute("cx", cx);
-  circle.setAttribute("cy", cy);
-  circle.setAttribute("r", 6);
-  circle.setAttribute("fill", colors[i]);
-  circle.setAttribute("stroke", "transparent");
-  circle.setAttribute("stroke-width", "3");
-
-  const circleId = `${label}-circle-${i}`;
-  myCircleStates[circleId] = false;
-
-  circle.addEventListener('click', () => {
-    if (searchMode) {
-      if (otherCircleStates[circleId]) {
-        showMessage("Found!", "found");
-      } else {
-        showMessage("Nothing Found", "nothing");
-      }
-    } else {
-      const isHighlighted = circle.getAttribute("stroke") === "black";
-      const newHighlighted = !isHighlighted;
-      circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
-      myCircleStates[circleId] = newHighlighted;
-      broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
-
-      if (newHighlighted && otherCircleStates[circleId]) {
-        showMessage("Collision!", "collision");
-      }
-    }
-  });
-
-  svg.appendChild(circle);
-}
+    // Circles: 3 blue on top, green bottom-left, red bottom-right
+    const circlePositions = [
+      { color: '#add8e6', dx: -10, dy: -20 }, // left-top blue
+      { color: '#add8e6', dx:  10, dy: -20 }, // right-top blue
+      { color: '#add8e6', dx:   0, dy: -30 }, // center-top blue
+      { color: '#90ee90', dx: -10, dy:  15 }, // bottom-left green
+      { color: '#f08080', dx:  10, dy:  15 }  // bottom-right red
+    ];
 
     circlePositions.forEach((pos, index) => {
       const cx = x + pos.dx;
