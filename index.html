@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Hex Grid Map P2P Sync</title>
+  <title>Stealth Board</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
@@ -12,6 +12,9 @@
       font-family: sans-serif;
       margin: 0;
       padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
     h2 {
       text-align: center;
@@ -29,17 +32,6 @@
       pointer-events: none;
     }
     line {
-      cursor: pointer;
-    }
-    #printBtn {
-      display: block;
-      margin: 0 auto 20px auto;
-      padding: 10px 20px;
-      font-size: 16px;
-      background: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 5px;
       cursor: pointer;
     }
     #sessionControls {
@@ -63,11 +55,22 @@
     #searchToggle.active {
       background: #2a8;
     }
+    #printBtn {
+      display: block;
+      margin: 20px auto;
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
 
-<h2>Hex Grid Map P2P Sync</h2>
+<h2>Stealth Board</h2>
 <div id="sessionControls">
   <button id="createSessionBtn">Create Session</button>
   <input id="sessionCodeInput" placeholder="Enter Session Code">
@@ -75,9 +78,9 @@
   <p id="sessionInfo"></p>
 </div>
 
-<button id="searchToggle">Search Mode: OFF</button>
-<button id="printBtn">Print / Export PDF</button>
+<button id="searchToggle">Placement Mode</button>
 <svg id="hexMap"></svg>
+<button id="printBtn">Print / Export PDF</button>
 
 <script>
   // ----------------------------
@@ -86,25 +89,36 @@
   let peer = null;
   let connections = [];
   let edgesMap = {};     // edgeId -> SVG line element
-  let edgeStates = {};   // edgeId -> boolean highlighted?
-  let circleStates = {}; // circleId -> boolean highlighted?
+  let edgeStates = {};   // local edges
+  let myCircleStates = {};   // my highlights
+  let otherCircleStates = {}; // known highlights from opponent
   let peerReady = false;
   let searchMode = false;
 
+  // Generate short 4-char session code
+  function generateShortCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 4; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  }
+
   function initPeer() {
-    peer = new Peer(); // Generate random ID
+    const code = generateShortCode();
+    peer = new Peer(code);
     peer.on('open', (id) => {
       peerReady = true;
       console.log("PeerJS ready with ID:", id);
     });
 
-    // When someone connects to us
     peer.on('connection', (conn) => {
       connections.push(conn);
       conn.on('data', handleIncomingData);
 
-      // Send current state to new peer immediately
-      conn.send({ type: "syncState", edges: edgeStates, circles: circleStates });
+      // Send current circle state (my own highlights only)
+      conn.send({ type: "syncCircles", circles: myCircleStates });
     });
   }
 
@@ -115,42 +129,11 @@
   }
 
   function handleIncomingData(data) {
-    // Edge toggles
-    if (data.type === "toggleEdge") {
-      const edge = edgesMap[data.edgeId];
-      if (edge) {
-        edge.setAttribute("stroke-width", data.highlighted ? "6" : "2");
-        edgeStates[data.edgeId] = data.highlighted;
-      }
+    if (data.type === "syncCircles") {
+      otherCircleStates = data.circles;
     }
-
-    // Circle toggles
     if (data.type === "toggleCircle") {
-      const circle = document.querySelector(`[data-circle-id="${data.circleId}"]`);
-      if (circle) {
-        circle.setAttribute("stroke", data.highlighted ? "black" : "transparent");
-        circleStates[data.circleId] = data.highlighted;
-      }
-    }
-
-    // Full sync
-    if (data.type === "syncState") {
-      for (const edgeId in data.edges) {
-        const edge = edgesMap[edgeId];
-        if (edge) {
-          const highlighted = data.edges[edgeId];
-          edge.setAttribute("stroke-width", highlighted ? "6" : "2");
-          edgeStates[edgeId] = highlighted;
-        }
-      }
-      for (const circleId in data.circles) {
-        const circle = document.querySelector(`[data-circle-id="${circleId}"]`);
-        if (circle) {
-          const highlighted = data.circles[circleId];
-          circle.setAttribute("stroke", highlighted ? "black" : "transparent");
-          circleStates[circleId] = highlighted;
-        }
-      }
+      otherCircleStates[data.circleId] = data.highlighted;
     }
   }
 
@@ -206,94 +189,48 @@
   svg.setAttribute('height', svgHeight);
 
   function createHex(x, y, label) {
-    const points = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = Math.PI / 3 * i - Math.PI / 6;
-      const px = x + size * Math.cos(angle);
-      const py = y + size * Math.sin(angle);
-      points.push({ x: px, y: py });
-    }
-
-    // Draw edges
-    for (let i = 0; i < 6; i++) {
-      const start = points[i];
-      const end = points[(i + 1) % 6];
-
-      const edge = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      edge.setAttribute("x1", start.x);
-      edge.setAttribute("y1", start.y);
-      edge.setAttribute("x2", end.x);
-      edge.setAttribute("y2", end.y);
-      edge.setAttribute("stroke", "#333");
-      edge.setAttribute("stroke-width", "2");
-
-      const edgeId = `${label}-edge-${i}`;
-      edge.dataset.edgeId = edgeId;
-      edgesMap[edgeId] = edge;
-      edgeStates[edgeId] = false;
-
-      svg.appendChild(edge);
-
-      const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      hitbox.setAttribute("x1", start.x);
-      hitbox.setAttribute("y1", start.y);
-      hitbox.setAttribute("x2", end.x);
-      hitbox.setAttribute("y2", end.y);
-      hitbox.setAttribute("stroke", "transparent");
-      hitbox.setAttribute("stroke-width", "15");
-      hitbox.style.cursor = "pointer";
-
-      hitbox.addEventListener('click', () => {
-        const isHighlighted = edge.getAttribute("stroke-width") === "6";
-        const newHighlighted = !isHighlighted;
-        edge.setAttribute("stroke-width", newHighlighted ? "6" : "2");
-        edgeStates[edgeId] = newHighlighted;
-
-        broadcast({ type: "toggleEdge", edgeId, highlighted: newHighlighted });
-      });
-
-      svg.appendChild(hitbox);
-    }
-
-    // Label inside hex (top-left relative)
+    // Label inside hex
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.6);
     text.setAttribute("y", y - size * 0.6);
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circles: top 3 blue, bottom-left green, bottom-right red
-    const circleConfig = [
-      { color: '#add8e6', offsetX: -15, offsetY: -20 }, // top-left
-      { color: '#add8e6', offsetX: 0, offsetY: -22 },   // top-center
-      { color: '#add8e6', offsetX: 15, offsetY: -20 },  // top-right
-      { color: '#90ee90', offsetX: -15, offsetY: 10 },  // bottom-left (green)
-      { color: '#f08080', offsetX: 15, offsetY: 10 }    // bottom-right (red)
-    ];
+    // Circle positions (evenly spaced circular pattern)
+    const circleColors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080'];
+    const circleRadius = 22;
+    const circleCount = circleColors.length;
 
-    circleConfig.forEach((cfg, idx) => {
+    circleColors.forEach((color, index) => {
+      const angle = (2 * Math.PI / circleCount) * index - Math.PI / 2;
+      const cx = x + circleRadius * Math.cos(angle);
+      const cy = y + circleRadius * Math.sin(angle);
+
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      circle.setAttribute("cx", x + cfg.offsetX);
-      circle.setAttribute("cy", y + cfg.offsetY);
+      circle.setAttribute("cx", cx);
+      circle.setAttribute("cy", cy);
       circle.setAttribute("r", 6);
-      circle.setAttribute("fill", cfg.color);
+      circle.setAttribute("fill", color);
       circle.setAttribute("stroke", "transparent");
       circle.setAttribute("stroke-width", "3");
 
-      const circleId = `${label}-circle-${idx}`;
-      circle.dataset.circleId = circleId;
-      circleStates[circleId] = false;
+      const circleId = `${label}-circle-${index}`;
+      myCircleStates[circleId] = false;
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          // In search mode: just check state and show alert
-          alert(circleStates[circleId] ? "Other player HAS highlighted this." : "Other player has NOT highlighted this.");
+          // SEARCH MODE: Check opponent highlights only
+          if (otherCircleStates[circleId]) {
+            alert("found!");
+          } else {
+            alert("nothing found");
+          }
         } else {
-          // Toggle highlight
+          // PLACEMENT MODE: Toggle my own highlight
           const isHighlighted = circle.getAttribute("stroke") === "black";
           const newHighlighted = !isHighlighted;
           circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
-          circleStates[circleId] = newHighlighted;
+          myCircleStates[circleId] = newHighlighted;
 
           broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
         }
@@ -320,7 +257,7 @@
   searchToggle.addEventListener('click', () => {
     searchMode = !searchMode;
     searchToggle.classList.toggle('active', searchMode);
-    searchToggle.textContent = `Search Mode: ${searchMode ? 'ON' : 'OFF'}`;
+    searchToggle.textContent = searchMode ? "Search Mode" : "Placement Mode";
   });
 
   // PDF Export
@@ -351,7 +288,7 @@
       const xOffset = (pageWidth - finalWidth) / 2;
       const yOffset = (pageHeight - finalHeight) / 2;
       pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
-      pdf.save('hex-grid.pdf');
+      pdf.save('stealth-board.pdf');
       URL.revokeObjectURL(url);
     };
     img.src = url;
