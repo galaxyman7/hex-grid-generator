@@ -1,11 +1,14 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Stealth Board</title>
+
+  <!-- External Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
   <style>
     body {
       background: #f9f9f9;
@@ -16,31 +19,34 @@
       flex-direction: column;
       align-items: center;
     }
-    h2 {
-      text-align: center;
-    }
+
+    h2 { text-align: center; }
+
     svg {
       display: block;
       margin: 0 auto 20px auto;
       background: #eef;
     }
+
     text {
-      font-size: 12px; /* bigger font */
+      font-size: 12px;
       fill: gray;
       text-anchor: start;
       dominant-baseline: hanging;
       pointer-events: none;
     }
-    line {
-      cursor: pointer;
-    }
+
+    line { cursor: pointer; }
+
     #sessionControls {
       text-align: center;
       margin-bottom: 20px;
     }
+
     #sessionCodeInput {
       padding: 5px;
     }
+
     #searchToggle {
       display: block;
       margin: 10px auto 20px auto;
@@ -52,12 +58,12 @@
       border-radius: 4px;
       cursor: pointer;
     }
-    #searchToggle.active {
-      background: #2a8;
-    }
-    #printBtn {
+
+    #searchToggle.active { background: #2a8; }
+
+    #printBtn, #saveBtn, #loadBtn {
       display: block;
-      margin: 20px auto;
+      margin: 10px auto;
       padding: 10px 20px;
       font-size: 16px;
       background: #4CAF50;
@@ -81,41 +87,25 @@
       opacity: 0;
       pointer-events: none;
     }
-    #message.show {
-      animation: slideFade 2s ease forwards;
-    }
-    #message.found {
-      background: rgba(0, 128, 0, 0.85);
-    }
-    #message.nothing {
-      background: rgba(200, 0, 0, 0.85);
-    }
-    #message.collision {
-      background: rgba(255, 140, 0, 0.85);
-    }
+
+    #message.show { animation: slideFade 2s ease forwards; }
+    #message.found { background: rgba(0, 128, 0, 0.85); }
+    #message.nothing { background: rgba(200, 0, 0, 0.85); }
+    #message.collision { background: rgba(255, 140, 0, 0.85); }
+
     @keyframes slideFade {
-      0% {
-        opacity: 0;
-        transform: translate(-50%, 0);
-      }
-      10% {
-        opacity: 1;
-        transform: translate(-50%, 10px);
-      }
-      80% {
-        opacity: 1;
-        transform: translate(-50%, 20px);
-      }
-      100% {
-        opacity: 0;
-        transform: translate(-50%, 40px);
-      }
+      0% { opacity: 0; transform: translate(-50%, 0); }
+      10% { opacity: 1; transform: translate(-50%, 10px); }
+      80% { opacity: 1; transform: translate(-50%, 20px); }
+      100% { opacity: 0; transform: translate(-50%, 40px); }
     }
   </style>
 </head>
 <body>
 
 <h2>Stealth Board</h2>
+
+<!-- Session controls -->
 <div id="sessionControls">
   <button id="createSessionBtn">Create Session</button>
   <input id="sessionCodeInput" placeholder="Enter Session Code">
@@ -123,23 +113,43 @@
   <p id="sessionInfo"></p>
 </div>
 
+<!-- Toggle between search/placement modes -->
 <button id="searchToggle">Placement Mode</button>
+
+<!-- Hex map container -->
 <svg id="hexMap"></svg>
+
+<!-- Host-only save/load and PDF export -->
+<button id="saveBtn" style="display:none;">Save Game</button>
+<button id="loadBtn" style="display:none;">Load Game</button>
 <button id="printBtn">Print / Export PDF</button>
 
+<!-- Floating notification -->
 <div id="message"></div>
 
 <script>
-  let peer = null;
-  let connections = [];
-  let edgesMap = {};     
-  let edgeStates = {};   
-  let myCircleStates = {};   
-  let otherCircleStates = {}; 
-  let peerReady = false;
-  let searchMode = false;
+  /***********************************************************
+   * Global State Variables
+   ***********************************************************/
+  let peer = null;                 // PeerJS connection object
+  let connections = [];            // All active peer connections
+  let isHost = false;              // True if this instance is DM
+  let peerReady = false;           // PeerJS ready flag
 
-  // Generate short session code
+  // Shared game data structures
+  let edgesMap = {};               // Reference to SVG edge elements
+  let edgeStates = {};             // Boolean for each edge highlight
+  let hostCircleStates = {};       // Circles placed by host (DM)
+  let playerCircleStates = {};     // Circles placed by all players (shared)
+
+  // UI state
+  let searchMode = false;          // Whether we're in "search" mode
+
+  /***********************************************************
+   * Utility Functions
+   ***********************************************************/
+
+  // Generate a short 4-character session code
   function generateShortCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
@@ -149,50 +159,7 @@
     return code;
   }
 
-  function initPeer() {
-    const code = generateShortCode();
-    peer = new Peer(code);
-    peer.on('open', (id) => {
-      peerReady = true;
-      console.log("PeerJS ready with ID:", id);
-    });
-
-    peer.on('connection', (conn) => {
-      connections.push(conn);
-      conn.on('data', handleIncomingData);
-      conn.send({ type: "syncAll", edges: edgeStates, circles: myCircleStates });
-    });
-  }
-
-  initPeer();
-
-  function broadcast(data) {
-    connections.forEach(conn => conn.send(data));
-  }
-
-  function handleIncomingData(data) {
-    if (data.type === "syncAll") {
-      for (const edgeId in data.edges) {
-        edgeStates[edgeId] = data.edges[edgeId];
-        if (edgesMap[edgeId]) {
-          edgesMap[edgeId].setAttribute("stroke-width", data.edges[edgeId] ? "6" : "2");
-        }
-      }
-      otherCircleStates = data.circles;
-    }
-    if (data.type === "toggleEdge") {
-      const edge = edgesMap[data.edgeId];
-      if (edge) {
-        edge.setAttribute("stroke-width", data.highlighted ? "6" : "2");
-        edgeStates[data.edgeId] = data.highlighted;
-      }
-    }
-    if (data.type === "toggleCircle") {
-      otherCircleStates[data.circleId] = data.highlighted;
-    }
-  }
-
-  // Floating message
+  // Show floating messages ("Found", "Collision", etc.)
   function showMessage(text, type) {
     const messageDiv = document.getElementById('message');
     messageDiv.textContent = text;
@@ -201,9 +168,121 @@
     setTimeout(() => messageDiv.classList.remove('show', type), 2000);
   }
 
+  // Send data to all connected peers
+  function broadcast(data) {
+    connections.forEach(conn => conn.send(data));
+  }
+
+  /***********************************************************
+   * PeerJS Initialization and Sync
+   ***********************************************************/
+  function initPeer() {
+    const code = generateShortCode();
+    peer = new Peer(code);
+
+    // PeerJS ready
+    peer.on('open', (id) => {
+      peerReady = true;
+      console.log("PeerJS ready with ID:", id);
+    });
+
+    // Incoming connection (only happens on host side)
+    peer.on('connection', (conn) => {
+      connections.push(conn);
+      conn.on('data', handleIncomingData);
+
+      // Send full game state to new guest:
+      // Edges always shared; circle states only send relevant team data
+      conn.send({
+        type: "syncAll",
+        edges: edgeStates,
+        hostCircles: hostCircleStates,
+        playerCircles: playerCircleStates
+      });
+    });
+  }
+
+  initPeer();
+
+  /***********************************************************
+   * Handle Incoming Data (Sync + Updates)
+   ***********************************************************/
+  function handleIncomingData(data) {
+    // Sync entire state (on join)
+    if (data.type === "syncAll") {
+      // Sync edges (shared for both teams)
+      edgeStates = data.edges;
+      updateEdgesUI();
+
+      // Sync circle states, but keep visibility team-based
+      hostCircleStates = data.hostCircles;
+      playerCircleStates = data.playerCircles;
+      updateCirclesUI();
+    }
+
+    // Toggle barrier (edge)
+    if (data.type === "toggleEdge") {
+      edgeStates[data.edgeId] = data.highlighted;
+      updateEdgesUI();
+    }
+
+    // Toggle circle highlight
+    if (data.type === "toggleCircle") {
+      // Host receives player placements; players receive host placements
+      if (isHost) {
+        playerCircleStates[data.circleId] = data.highlighted;
+      } else {
+        hostCircleStates[data.circleId] = data.highlighted;
+      }
+      updateCirclesUI();
+    }
+  }
+
+  /***********************************************************
+   * UI Update Functions
+   ***********************************************************/
+  function updateEdgesUI() {
+    for (const edgeId in edgesMap) {
+      edgesMap[edgeId].setAttribute(
+        "stroke-width",
+        edgeStates[edgeId] ? "6" : "2"
+      );
+    }
+  }
+
+  function updateCirclesUI() {
+    // Determine which set of circles we can see
+    const visibleCircles = isHost ? hostCircleStates : playerCircleStates;
+
+    for (const circleId in hostCircleStates) {
+      const circleEl = document.getElementById(circleId);
+      if (!circleEl) continue;
+
+      let strokeColor = "transparent";
+
+      // If this circle is marked by our team, show black
+      if (visibleCircles[circleId]) {
+        strokeColor = "black";
+      }
+
+      // Collision check: if both teams have it marked
+      if (hostCircleStates[circleId] && playerCircleStates[circleId]) {
+        strokeColor = "red";
+      }
+
+      circleEl.setAttribute("stroke", strokeColor);
+    }
+  }
+
+  /***********************************************************
+   * Session Controls (Create/Join)
+   ***********************************************************/
   document.getElementById('createSessionBtn').addEventListener('click', () => {
     if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
+    isHost = true;
     document.getElementById('sessionInfo').textContent = `Your Session Code: ${peer.id}`;
+    document.getElementById('saveBtn').style.display = 'block';
+    document.getElementById('loadBtn').style.display = 'block';
   });
 
   document.getElementById('joinSessionBtn').addEventListener('click', () => {
@@ -219,9 +298,12 @@
     conn.on('data', handleIncomingData);
   });
 
+  /***********************************************************
+   * Hex Grid Generation
+   ***********************************************************/
   const svg = document.getElementById('hexMap');
-  const size = 60;
-  const marginInches = 0.5;
+  const size = 60;                        // hex radius
+  const marginInches = 0.5;               // page margins for PDF export
   const pageWidthIn = 8.5;
   const pageHeightIn = 11;
   const dpi = 96;
@@ -246,7 +328,11 @@
   svg.setAttribute('width', svgWidth);
   svg.setAttribute('height', svgHeight);
 
+  /***********************************************************
+   * Create Individual Hex
+   ***********************************************************/
   function createHex(x, y, label) {
+    // Compute hex corner points
     const points = [];
     for (let i = 0; i < 6; i++) {
       const angle = Math.PI / 3 * i - Math.PI / 6;
@@ -255,7 +341,7 @@
       points.push({ x: px, y: py });
     }
 
-    // Outer edges
+    // Create edges (barriers)
     for (let i = 0; i < 6; i++) {
       const start = points[i];
       const end = points[(i + 1) % 6];
@@ -273,6 +359,7 @@
       edgeStates[edgeId] = false;
       svg.appendChild(edge);
 
+      // Hitbox for edge clicks (toggle barrier)
       const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
       hitbox.setAttribute("x1", start.x);
       hitbox.setAttribute("y1", start.y);
@@ -293,20 +380,20 @@
       svg.appendChild(hitbox);
     }
 
-    // Label moved lower and right
+    // Label for hex
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", x - size * 0.1);
-    text.setAttribute("y", y - size * 0.1);
+    text.setAttribute("x", x - size * 0.4);
+    text.setAttribute("y", y - size * 0.4);
     text.textContent = label;
     svg.appendChild(text);
 
-    // Pentagon layout for circles (rotated 72° CCW)
+    // Create five small circles in pentagon layout
+    const colors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080'];
     const radius = 25;
-    const colors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080']; 
-    const rotationOffset = (-72 * Math.PI) / 180; // 72 degrees in radians
+    const angleOffset = -Math.PI / 2 + (72 * Math.PI / 180);
 
     for (let i = 0; i < 5; i++) {
-      const angle = -Math.PI / 2 + rotationOffset + (2 * Math.PI / 5) * i;
+      const angle = angleOffset + (i * 2 * Math.PI / 5);
       const cx = x + radius * Math.cos(angle);
       const cy = y + radius * Math.sin(angle);
 
@@ -319,25 +406,34 @@
       circle.setAttribute("stroke-width", "3");
 
       const circleId = `${label}-circle-${i}`;
-      myCircleStates[circleId] = false;
+      hostCircleStates[circleId] = false;
+      playerCircleStates[circleId] = false;
+      circle.setAttribute("id", circleId);
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          if (otherCircleStates[circleId]) {
+          // Searching looks for enemy team’s circles
+          const enemyCircles = isHost ? playerCircleStates : hostCircleStates;
+          if (enemyCircles[circleId]) {
             showMessage("Found!", "found");
           } else {
             showMessage("Nothing Found", "nothing");
           }
         } else {
-          const isHighlighted = circle.getAttribute("stroke") === "black";
-          const newHighlighted = !isHighlighted;
-          circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
-          myCircleStates[circleId] = newHighlighted;
+          // Placement toggles our team’s circle
+          const teamCircles = isHost ? hostCircleStates : playerCircleStates;
+          const newHighlighted = !teamCircles[circleId];
+          teamCircles[circleId] = newHighlighted;
+
+          // Broadcast update so opposite team can detect collisions
           broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
 
-          if (newHighlighted && otherCircleStates[circleId]) {
+          // Collision detection: both teams highlight same circle
+          if (hostCircleStates[circleId] && playerCircleStates[circleId]) {
             showMessage("Collision!", "collision");
           }
+
+          updateCirclesUI();
         }
       });
 
@@ -345,7 +441,7 @@
     }
   }
 
-  // Build grid
+  // Build entire hex grid
   for (let row = 0; row < rows; row++) {
     const rowLetter = String.fromCharCode(65 + (row % 26));
     for (let col = 0; col < cols; col++) {
@@ -357,7 +453,9 @@
     }
   }
 
-  // Toggle search mode
+  /***********************************************************
+   * Mode Toggle (Search vs Placement)
+   ***********************************************************/
   const searchToggle = document.getElementById('searchToggle');
   searchToggle.addEventListener('click', () => {
     searchMode = !searchMode;
@@ -365,7 +463,55 @@
     searchToggle.textContent = searchMode ? "Search Mode" : "Placement Mode";
   });
 
-  // PDF Export
+  /***********************************************************
+   * Save and Load (Host Only)
+   ***********************************************************/
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    if (!isHost) return;
+    const data = JSON.stringify({
+      edges: edgeStates,
+      hostCircles: hostCircleStates,
+      playerCircles: playerCircleStates
+    });
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'stealth-save.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('loadBtn').addEventListener('click', () => {
+    if (!isHost) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = e => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const data = JSON.parse(reader.result);
+        edgeStates = data.edges;
+        hostCircleStates = data.hostCircles;
+        playerCircleStates = data.playerCircles;
+        updateEdgesUI();
+        updateCirclesUI();
+        broadcast({
+          type: "syncAll",
+          edges: edgeStates,
+          hostCircles: hostCircleStates,
+          playerCircles: playerCircleStates
+        });
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  });
+
+  /***********************************************************
+   * PDF Export (For printing board)
+   ***********************************************************/
   document.getElementById('printBtn').addEventListener('click', () => {
     const { jsPDF } = window.jspdf;
     const svgData = new XMLSerializer().serializeToString(svg);
