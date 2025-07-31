@@ -386,11 +386,16 @@
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          if (guestCircleStates[circleId]) {
-            showMessage("Found!", "found");
-          } else {
-            showMessage("Nothing Found", "nothing");
-          }
+          // Guests searching: found if highlighted by host OR by other guests (excluding self)
+const isHighlightedByHost = hostCircleStates[circleId] || false;
+const isHighlightedByGuest = guestCircleStates[circleId] || false;
+const isOwn = myCircleStates[circleId] || false;
+
+if ((isHighlightedByHost || isHighlightedByGuest) && !isOwn) {
+  showMessage("Found!", "found");
+} else {
+  showMessage("Nothing Found", "nothing");
+}
         } else {
           const isHighlighted = circle.getAttribute("stroke") === "black";
           const newHighlighted = !isHighlighted;
