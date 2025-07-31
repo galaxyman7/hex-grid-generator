@@ -4,546 +4,85 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Stealth Board</title>
-
-  <!-- External Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-
   <style>
-    body {
-      background: #f9f9f9;
-      font-family: sans-serif;
-      margin: 0;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    h2 { text-align: center; }
-
-    svg {
-      display: block;
-      margin: 0 auto 20px auto;
-      background: #eef;
-    }
-
-    text {
-      font-size: 12px;
-      fill: gray;
-      text-anchor: start;
-      dominant-baseline: hanging;
-      pointer-events: none;
-    }
-
-    line { cursor: pointer; }
-
-    #sessionControls {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-
-    #sessionCodeInput {
-      padding: 5px;
-    }
-
-    #searchToggle {
-      display: block;
-      margin: 10px auto 20px auto;
-      padding: 8px 16px;
-      font-size: 14px;
-      background: #555;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    #searchToggle.active { background: #2a8; }
-
-    #printBtn, #saveBtn, #loadBtn {
-      display: block;
-      margin: 10px auto;
-      padding: 10px 20px;
-      font-size: 16px;
-      background: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-
-    /* Floating message with slide/fade animation */
-    #message {
-      position: fixed;
-      bottom: 60px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 15px 30px;
-      border-radius: 8px;
-      font-size: 20px;
-      font-weight: bold;
-      color: #fff;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    #message.show { animation: slideFade 2s ease forwards; }
-    #message.found { background: rgba(0, 128, 0, 0.85); }
-    #message.nothing { background: rgba(200, 0, 0, 0.85); }
-    #message.collision { background: rgba(255, 140, 0, 0.85); }
-
-    @keyframes slideFade {
-      0% { opacity: 0; transform: translate(-50%, 0); }
-      10% { opacity: 1; transform: translate(-50%, 10px); }
-      80% { opacity: 1; transform: translate(-50%, 20px); }
-      100% { opacity: 0; transform: translate(-50%, 40px); }
-    }
+    body {background:#f9f9f9;font-family:sans-serif;margin:0;padding:20px;display:flex;flex-direction:column;align-items:center;}
+    h2{text-align:center;}
+    svg{display:block;margin:0 auto 20px;background:#eef;}
+    text{font-size:12px;fill:gray;text-anchor:start;dominant-baseline:hanging;pointer-events:none;}
+    line{cursor:pointer;}
+    #sessionControls{text-align:center;margin-bottom:20px;}
+    #sessionCodeInput{padding:5px;}
+    #searchToggle{display:block;margin:10px auto 20px;padding:8px 16px;font-size:14px;background:#555;color:white;border:none;border-radius:4px;cursor:pointer;}
+    #searchToggle.active{background:#2a8;}
+    #printBtn,#saveBtn,#loadBtn,#resyncBtn{display:block;margin:10px auto;padding:10px 20px;font-size:16px;background:#4CAF50;color:white;border:none;border-radius:5px;cursor:pointer;}
+    #message{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);padding:15px 30px;border-radius:8px;font-size:20px;font-weight:bold;color:#fff;opacity:0;pointer-events:none;}
+    #message.show{animation:slideFade 2s ease forwards;}
+    #message.found{background:rgba(0,128,0,0.85);}
+    #message.nothing{background:rgba(200,0,0,0.85);}
+    #message.collision{background:rgba(255,140,0,0.85);}
+    @keyframes slideFade{0%{opacity:0;transform:translate(-50%,0);}10%{opacity:1;transform:translate(-50%,10px);}80%{opacity:1;transform:translate(-50%,20px);}100%{opacity:0;transform:translate(-50%,40px);}}
   </style>
 </head>
 <body>
-
 <h2>Stealth Board</h2>
-
-<!-- Session controls -->
 <div id="sessionControls">
   <button id="createSessionBtn">Create Session</button>
   <input id="sessionCodeInput" placeholder="Enter Session Code">
   <button id="joinSessionBtn">Join Session</button>
   <p id="sessionInfo"></p>
 </div>
-
-<!-- Toggle between search/placement modes -->
 <button id="searchToggle">Placement Mode</button>
-
-<!-- Hex map container -->
 <svg id="hexMap"></svg>
-
-<!-- Host-only save/load and PDF export -->
 <button id="saveBtn" style="display:none;">Save Game</button>
 <button id="loadBtn" style="display:none;">Load Game</button>
+<button id="resyncBtn" style="display:none;">Resync Clients</button>
 <button id="printBtn">Print / Export PDF</button>
-
-<!-- Floating notification -->
 <div id="message"></div>
-
 <script>
-  /***********************************************************
-   * Global State Variables
-   ***********************************************************/
-  let peer = null;                 // PeerJS connection object
-  let connections = [];            // All active peer connections
-  let isHost = false;              // True if this instance is DM
-  let peerReady = false;           // PeerJS ready flag
-
-  // Shared game data structures
-  let edgesMap = {};               // Reference to SVG edge elements
-  let edgeStates = {};             // Boolean for each edge highlight
-  let hostCircleStates = {};       // Circles placed by host (DM)
-  let playerCircleStates = {};     // Circles placed by all players (shared)
-
-  // UI state
-  let searchMode = false;          // Whether we're in "search" mode
-
-  /***********************************************************
-   * Utility Functions
-   ***********************************************************/
-
-  // Generate a short 4-character session code
-  function generateShortCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-  }
-
-  // Show floating messages ("Found", "Collision", etc.)
-  function showMessage(text, type) {
-    const messageDiv = document.getElementById('message');
-    messageDiv.textContent = text;
-    messageDiv.className = ''; // reset classes
-    messageDiv.classList.add('show', type);
-    setTimeout(() => messageDiv.classList.remove('show', type), 2000);
-  }
-
-  // Send data to all connected peers
-  function broadcast(data) {
-    connections.forEach(conn => conn.send(data));
-  }
-
-  /***********************************************************
-   * PeerJS Initialization and Sync
-   ***********************************************************/
-  function initPeer() {
-    const code = generateShortCode();
-    peer = new Peer(code);
-
-    // PeerJS ready
-    peer.on('open', (id) => {
-      peerReady = true;
-      console.log("PeerJS ready with ID:", id);
-    });
-
-    // Incoming connection (only happens on host side)
-    peer.on('connection', (conn) => {
-      connections.push(conn);
-      conn.on('data', handleIncomingData);
-
-      // Send full game state to new guest:
-      // Edges always shared; circle states only send relevant team data
-      conn.send({
-        type: "syncAll",
-        edges: edgeStates,
-        hostCircles: hostCircleStates,
-        playerCircles: playerCircleStates
-      });
-    });
-  }
-
-  initPeer();
-
-  /***********************************************************
-   * Handle Incoming Data (Sync + Updates)
-   ***********************************************************/
-  function handleIncomingData(data) {
-    // Sync entire state (on join)
-    if (data.type === "syncAll") {
-      // Sync edges (shared for both teams)
-      edgeStates = data.edges;
-      updateEdgesUI();
-
-      // Sync circle states, but keep visibility team-based
-      hostCircleStates = data.hostCircles;
-      playerCircleStates = data.playerCircles;
-      updateCirclesUI();
-    }
-
-    // Toggle barrier (edge)
-    if (data.type === "toggleEdge") {
-      edgeStates[data.edgeId] = data.highlighted;
-      updateEdgesUI();
-    }
-
-    // Toggle circle highlight
-    if (data.type === "toggleCircle") {
-      // Host receives player placements; players receive host placements
-      if (isHost) {
-        playerCircleStates[data.circleId] = data.highlighted;
-      } else {
-        hostCircleStates[data.circleId] = data.highlighted;
-      }
-      updateCirclesUI();
-    }
-  }
-
-  /***********************************************************
-   * UI Update Functions
-   ***********************************************************/
-  function updateEdgesUI() {
-    for (const edgeId in edgesMap) {
-      edgesMap[edgeId].setAttribute(
-        "stroke-width",
-        edgeStates[edgeId] ? "6" : "2"
-      );
-    }
-  }
-
-  function updateCirclesUI() {
-    // Determine which set of circles we can see
-    const visibleCircles = isHost ? hostCircleStates : playerCircleStates;
-
-    for (const circleId in hostCircleStates) {
-      const circleEl = document.getElementById(circleId);
-      if (!circleEl) continue;
-
-      let strokeColor = "transparent";
-
-      // If this circle is marked by our team, show black
-      if (visibleCircles[circleId]) {
-        strokeColor = "black";
-      }
-
-      // Collision check: if both teams have it marked
-      if (hostCircleStates[circleId] && playerCircleStates[circleId]) {
-        strokeColor = "red";
-      }
-
-      circleEl.setAttribute("stroke", strokeColor);
-    }
-  }
-
-  /***********************************************************
-   * Session Controls (Create/Join)
-   ***********************************************************/
-  document.getElementById('createSessionBtn').addEventListener('click', () => {
-    if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
-    isHost = true;
-    document.getElementById('sessionInfo').textContent = `Your Session Code: ${peer.id}`;
-    document.getElementById('saveBtn').style.display = 'block';
-    document.getElementById('loadBtn').style.display = 'block';
-  });
-
-  document.getElementById('joinSessionBtn').addEventListener('click', () => {
-    const code = document.getElementById('sessionCodeInput').value.trim();
-    if (!code) return alert("Enter a session code!");
-    if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
-
-    const conn = peer.connect(code);
-    conn.on('open', () => {
-      connections.push(conn);
-      document.getElementById('sessionInfo').textContent = `Connected to session: ${code}`;
-    });
-    conn.on('data', handleIncomingData);
-  });
-
-  /***********************************************************
-   * Hex Grid Generation
-   ***********************************************************/
-  const svg = document.getElementById('hexMap');
-  const size = 60;                        // hex radius
-  const marginInches = 0.5;               // page margins for PDF export
-  const pageWidthIn = 8.5;
-  const pageHeightIn = 11;
-  const dpi = 96;
-
-  const marginPx = marginInches * dpi;
-  const pageWidthPx = pageWidthIn * dpi;
-  const pageHeightPx = pageHeightIn * dpi;
-
-  const drawWidth = pageWidthPx - 2 * marginPx;
-  const drawHeight = pageHeightPx - 2 * marginPx;
-
-  const hexWidth = Math.sqrt(3) * size;
-  const hexHeight = 2 * size;
-  const horizDist = hexWidth;
-  const vertDist = 0.75 * hexHeight;
-
-  const cols = Math.floor(drawWidth / horizDist);
-  const rows = Math.floor(drawHeight / vertDist);
-
-  const svgWidth = cols * horizDist + hexWidth;
-  const svgHeight = rows * vertDist + hexHeight;
-  svg.setAttribute('width', svgWidth);
-  svg.setAttribute('height', svgHeight);
-
-  /***********************************************************
-   * Create Individual Hex
-   ***********************************************************/
-  function createHex(x, y, label) {
-    // Compute hex corner points
-    const points = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = Math.PI / 3 * i - Math.PI / 6;
-      const px = x + size * Math.cos(angle);
-      const py = y + size * Math.sin(angle);
-      points.push({ x: px, y: py });
-    }
-
-    // Create edges (barriers)
-    for (let i = 0; i < 6; i++) {
-      const start = points[i];
-      const end = points[(i + 1) % 6];
-
-      const edge = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      edge.setAttribute("x1", start.x);
-      edge.setAttribute("y1", start.y);
-      edge.setAttribute("x2", end.x);
-      edge.setAttribute("y2", end.y);
-      edge.setAttribute("stroke", "#333");
-      edge.setAttribute("stroke-width", "2");
-
-      const edgeId = `${label}-edge-${i}`;
-      edgesMap[edgeId] = edge;
-      edgeStates[edgeId] = false;
-      svg.appendChild(edge);
-
-      // Hitbox for edge clicks (toggle barrier)
-      const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      hitbox.setAttribute("x1", start.x);
-      hitbox.setAttribute("y1", start.y);
-      hitbox.setAttribute("x2", end.x);
-      hitbox.setAttribute("y2", end.y);
-      hitbox.setAttribute("stroke", "transparent");
-      hitbox.setAttribute("stroke-width", "15");
-      hitbox.style.cursor = "pointer";
-
-      hitbox.addEventListener('click', () => {
-        const isHighlighted = edge.getAttribute("stroke-width") === "6";
-        const newHighlighted = !isHighlighted;
-        edge.setAttribute("stroke-width", newHighlighted ? "6" : "2");
-        edgeStates[edgeId] = newHighlighted;
-        broadcast({ type: "toggleEdge", edgeId, highlighted: newHighlighted });
-      });
-
-      svg.appendChild(hitbox);
-    }
-
-    // Label for hex
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", x - size * 0.4);
-    text.setAttribute("y", y - size * 0.4);
-    text.textContent = label;
-    svg.appendChild(text);
-
-    // Create five small circles in pentagon layout
-    const colors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080'];
-    const radius = 25;
-    const angleOffset = -Math.PI / 2 + (72 * Math.PI / 180);
-
-    for (let i = 0; i < 5; i++) {
-      const angle = angleOffset + (i * 2 * Math.PI / 5);
-      const cx = x + radius * Math.cos(angle);
-      const cy = y + radius * Math.sin(angle);
-
-      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      circle.setAttribute("cx", cx);
-      circle.setAttribute("cy", cy);
-      circle.setAttribute("r", 6);
-      circle.setAttribute("fill", colors[i]);
-      circle.setAttribute("stroke", "transparent");
-      circle.setAttribute("stroke-width", "3");
-
-      const circleId = `${label}-circle-${i}`;
-      hostCircleStates[circleId] = false;
-      playerCircleStates[circleId] = false;
-      circle.setAttribute("id", circleId);
-
-      circle.addEventListener('click', () => {
-        if (searchMode) {
-          // Searching looks for enemy team’s circles
-          const enemyCircles = isHost ? playerCircleStates : hostCircleStates;
-          if (enemyCircles[circleId]) {
-            showMessage("Found!", "found");
-          } else {
-            showMessage("Nothing Found", "nothing");
-          }
-        } else {
-          // Placement toggles our team’s circle
-          const teamCircles = isHost ? hostCircleStates : playerCircleStates;
-          const newHighlighted = !teamCircles[circleId];
-          teamCircles[circleId] = newHighlighted;
-
-          // Broadcast update so opposite team can detect collisions
-          broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
-
-          // Collision detection: both teams highlight same circle
-          if (hostCircleStates[circleId] && playerCircleStates[circleId]) {
-            showMessage("Collision!", "collision");
-          }
-
-          updateCirclesUI();
-        }
-      });
-
-      svg.appendChild(circle);
-    }
-  }
-
-  // Build entire hex grid
-  for (let row = 0; row < rows; row++) {
-    const rowLetter = String.fromCharCode(65 + (row % 26));
-    for (let col = 0; col < cols; col++) {
-      const xOffset = (row % 2 === 0) ? 0 : horizDist / 2;
-      const x = col * horizDist + xOffset + size;
-      const y = row * vertDist + size;
-      const label = `${rowLetter}${col + 1}`;
-      createHex(x, y, label);
-    }
-  }
-
-  /***********************************************************
-   * Mode Toggle (Search vs Placement)
-   ***********************************************************/
-  const searchToggle = document.getElementById('searchToggle');
-  searchToggle.addEventListener('click', () => {
-    searchMode = !searchMode;
-    searchToggle.classList.toggle('active', searchMode);
-    searchToggle.textContent = searchMode ? "Search Mode" : "Placement Mode";
-  });
-
-  /***********************************************************
-   * Save and Load (Host Only)
-   ***********************************************************/
-  document.getElementById('saveBtn').addEventListener('click', () => {
-    if (!isHost) return;
-    const data = JSON.stringify({
-      edges: edgeStates,
-      hostCircles: hostCircleStates,
-      playerCircles: playerCircleStates
-    });
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'stealth-save.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  });
-
-  document.getElementById('loadBtn').addEventListener('click', () => {
-    if (!isHost) return;
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json';
-    input.onchange = e => {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        const data = JSON.parse(reader.result);
-        edgeStates = data.edges;
-        hostCircleStates = data.hostCircles;
-        playerCircleStates = data.playerCircles;
-        updateEdgesUI();
-        updateCirclesUI();
-        broadcast({
-          type: "syncAll",
-          edges: edgeStates,
-          hostCircles: hostCircleStates,
-          playerCircles: playerCircleStates
-        });
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  });
-
-  /***********************************************************
-   * PDF Export (For printing board)
-   ***********************************************************/
-  document.getElementById('printBtn').addEventListener('click', () => {
-    const { jsPDF } = window.jspdf;
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.onload = function() {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.width = svg.clientWidth;
-      canvas.height = svg.clientHeight;
-      ctx.drawImage(img, 0, 0);
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'in', format: 'letter' });
-      const pageWidth = 8.5;
-      const pageHeight = 11;
-      const margin = 0.5;
-      const usableWidth = pageWidth - 2 * margin;
-      const usableHeight = pageHeight - 2 * margin;
-      const imgWidth = canvas.width / dpi;
-      const imgHeight = canvas.height / dpi;
-      let scale = Math.min(usableWidth / imgWidth, usableHeight / imgHeight);
-      const finalWidth = imgWidth * scale;
-      const finalHeight = imgHeight * scale;
-      const xOffset = (pageWidth - finalWidth) / 2;
-      const yOffset = (pageHeight - finalHeight) / 2;
-      pdf.addImage(imgData, 'PNG', xOffset, yOffset, finalWidth, finalHeight);
-      pdf.save('stealth-board.pdf');
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  });
+let peer=null,connections=[],isHost=false,peerReady=false;
+let edgesMap={},edgeStates={},hostCircleStates={},playerCircleStates={};
+let searchMode=false;
+function generateShortCode(){const c='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';let code='';for(let i=0;i<4;i++){code+=c.charAt(Math.floor(Math.random()*c.length));}return code;}
+function showMessage(text,type){const m=document.getElementById('message');m.textContent=text;m.className='';m.classList.add('show',type);setTimeout(()=>m.classList.remove('show',type),2000);}
+function broadcast(data){connections.forEach(conn=>conn.send(data));}
+function initPeer(){const code=generateShortCode();peer=new Peer(code);peer.on('open',id=>{peerReady=true;});peer.on('connection',conn=>{connections.push(conn);conn.on('data',handleIncomingData);
+  conn.send({type:"syncAll",edges:edgeStates,hostCircles:hostCircleStates,playerCircles:playerCircleStates});
+});}
+initPeer();
+function handleIncomingData(data){if(data.type==="syncAll"){edgeStates=data.edges;updateEdgesUI();hostCircleStates=data.hostCircles;playerCircleStates=data.playerCircles;updateCirclesUI();}
+if(data.type==="toggleEdge"){edgeStates[data.edgeId]=data.highlighted;updateEdgesUI();}
+if(data.type==="toggleCircle"){if(isHost){playerCircleStates[data.circleId]=data.highlighted;}else{hostCircleStates[data.circleId]=data.highlighted;}updateCirclesUI();}}
+function updateEdgesUI(){for(const edgeId in edgesMap){edgesMap[edgeId].setAttribute("stroke-width",edgeStates[edgeId]?"6":"2");}}
+function updateCirclesUI(){const visibleCircles=isHost?hostCircleStates:playerCircleStates;for(const circleId in hostCircleStates){const circleEl=document.getElementById(circleId);if(!circleEl)continue;let strokeColor="transparent";if(visibleCircles[circleId])strokeColor="black";if(hostCircleStates[circleId]&&playerCircleStates[circleId])strokeColor="red";circleEl.setAttribute("stroke",strokeColor);}}
+document.getElementById('createSessionBtn').addEventListener('click',()=>{if(!peerReady)return alert("Peer not ready yet. Please wait a second.");isHost=true;document.getElementById('sessionInfo').textContent=`Your Session Code: ${peer.id}`;document.getElementById('saveBtn').style.display='block';document.getElementById('loadBtn').style.display='block';document.getElementById('resyncBtn').style.display='block';});
+document.getElementById('joinSessionBtn').addEventListener('click',()=>{const code=document.getElementById('sessionCodeInput').value.trim();if(!code)return alert("Enter a session code!");if(!peerReady)return alert("Peer not ready yet. Please wait a second.");const conn=peer.connect(code);conn.on('open',()=>{connections.push(conn);document.getElementById('sessionInfo').textContent=`Connected to session: ${code}`;});conn.on('data',handleIncomingData);});
+const svg=document.getElementById('hexMap');const size=60,marginInches=0.5,pageWidthIn=8.5,pageHeightIn=11,dpi=96;
+const marginPx=marginInches*dpi,pageWidthPx=pageWidthIn*dpi,pageHeightPx=pageHeightIn*dpi;
+const drawWidth=pageWidthPx-2*marginPx,drawHeight=pageHeightPx-2*marginPx;
+const hexWidth=Math.sqrt(3)*size,hexHeight=2*size,horizDist=hexWidth,vertDist=0.75*hexHeight;
+const cols=Math.floor(drawWidth/horizDist),rows=Math.floor(drawHeight/vertDist);
+const svgWidth=cols*horizDist+hexWidth,svgHeight=rows*vertDist+hexHeight;
+svg.setAttribute('width',svgWidth);svg.setAttribute('height',svgHeight);
+function createHex(x,y,label){const points=[];for(let i=0;i<6;i++){const angle=Math.PI/3*i-Math.PI/6;const px=x+size*Math.cos(angle);const py=y+size*Math.sin(angle);points.push({x:px,y:py});}
+for(let i=0;i<6;i++){const start=points[i];const end=points[(i+1)%6];const edge=document.createElementNS("http://www.w3.org/2000/svg","line");edge.setAttribute("x1",start.x);edge.setAttribute("y1",start.y);edge.setAttribute("x2",end.x);edge.setAttribute("y2",end.y);edge.setAttribute("stroke","#333");edge.setAttribute("stroke-width","2");const edgeId=`${label}-edge-${i}`;edgesMap[edgeId]=edge;edgeStates[edgeId]=false;svg.appendChild(edge);
+const hitbox=document.createElementNS("http://www.w3.org/2000/svg","line");hitbox.setAttribute("x1",start.x);hitbox.setAttribute("y1",start.y);hitbox.setAttribute("x2",end.x);hitbox.setAttribute("y2",end.y);hitbox.setAttribute("stroke","transparent");hitbox.setAttribute("stroke-width","15");hitbox.style.cursor="pointer";hitbox.addEventListener('click',()=>{const isHighlighted=edge.getAttribute("stroke-width")==="6";const newHighlighted=!isHighlighted;edge.setAttribute("stroke-width",newHighlighted?"6":"2");edgeStates[edgeId]=newHighlighted;broadcast({type:"toggleEdge",edgeId,highlighted:newHighlighted});});svg.appendChild(hitbox);}
+const text=document.createElementNS("http://www.w3.org/2000/svg","text");text.setAttribute("x",x-size*0.4);text.setAttribute("y",y-size*0.4);text.textContent=label;svg.appendChild(text);
+const colors=['#add8e6','#add8e6','#add8e6','#90ee90','#f08080'];const radius=25;const angleOffset=-Math.PI/2+(72*Math.PI/180);
+for(let i=0;i<5;i++){const angle=angleOffset+(i*2*Math.PI/5);const cx=x+radius*Math.cos(angle);const cy=y+radius*Math.sin(angle);
+const circle=document.createElementNS("http://www.w3.org/2000/svg","circle");circle.setAttribute("cx",cx);circle.setAttribute("cy",cy);circle.setAttribute("r",6);circle.setAttribute("fill",colors[i]);circle.setAttribute("stroke","transparent");circle.setAttribute("stroke-width","3");const circleId=`${label}-circle-${i}`;hostCircleStates[circleId]=false;playerCircleStates[circleId]=false;circle.setAttribute("id",circleId);
+circle.addEventListener('click',()=>{if(searchMode){const enemyCircles=isHost?playerCircleStates:hostCircleStates;if(enemyCircles[circleId]){showMessage("Found!","found");}else{showMessage("Nothing Found","nothing");}}else{const teamCircles=isHost?hostCircleStates:playerCircleStates;const newHighlighted=!teamCircles[circleId];teamCircles[circleId]=newHighlighted;broadcast({type:"toggleCircle",circleId,highlighted:newHighlighted});if(hostCircleStates[circleId]&&playerCircleStates[circleId]){showMessage("Collision!","collision");}updateCirclesUI();}});
+svg.appendChild(circle);}}
+for(let row=0;row<rows;row++){const rowLetter=String.fromCharCode(65+(row%26));for(let col=0;col<cols;col++){const xOffset=(row%2===0)?0:horizDist/2;const x=col*horizDist+xOffset+size;const y=row*vertDist+size;const label=`${rowLetter}${col+1}`;createHex(x,y,label);}}
+const searchToggle=document.getElementById('searchToggle');
+searchToggle.addEventListener('click',()=>{searchMode=!searchMode;searchToggle.classList.toggle('active',searchMode);searchToggle.textContent=searchMode?"Search Mode":"Placement Mode";});
+document.getElementById('saveBtn').addEventListener('click',()=>{if(!isHost)return;const data=JSON.stringify({edges:edgeStates,hostCircles:hostCircleStates,playerCircles:playerCircleStates});const blob=new Blob([data],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='stealth-save.json';a.click();URL.revokeObjectURL(url);});
+document.getElementById('loadBtn').addEventListener('click',()=>{if(!isHost)return;const input=document.createElement('input');input.type='file';input.accept='application/json';input.onchange=e=>{const file=e.target.files[0];const reader=new FileReader();reader.onload=()=>{const data=JSON.parse(reader.result);edgeStates=data.edges;hostCircleStates=data.hostCircles;playerCircleStates=data.playerCircles;updateEdgesUI();updateCirclesUI();broadcast({type:"syncAll",edges:edgeStates,hostCircles:hostCircleStates,playerCircles:playerCircleStates});};reader.readAsText(file);};input.click();});
+// Resync button sends current state to all clients
+const resyncBtn=document.getElementById('resyncBtn');
+resyncBtn.addEventListener('click',()=>{if(!isHost)return;broadcast({type:"syncAll",edges:edgeStates,hostCircles:hostCircleStates,playerCircles:playerCircleStates});showMessage("Resynced!","found");});
+document.getElementById('printBtn').addEventListener('click',()=>{const {jsPDF}=window.jspdf;const svgData=new XMLSerializer().serializeToString(svg);const svgBlob=new Blob([svgData],{type:"image/svg+xml;charset=utf-8"});const url=URL.createObjectURL(svgBlob);const img=new Image();img.onload=function(){const canvas=document.createElement("canvas");const ctx=canvas.getContext("2d");canvas.width=svg.clientWidth;canvas.height=svg.clientHeight;ctx.drawImage(img,0,0);const imgData=canvas.toDataURL("image/png");const pdf=new jsPDF({orientation:'portrait',unit:'in',format:'letter'});const pageWidth=8.5;const pageHeight=11;const margin=0.5;const usableWidth=pageWidth-2*margin;const usableHeight=pageHeight-2*margin;const imgWidth=canvas.width/dpi;const imgHeight=canvas.height/dpi;let scale=Math.min(usableWidth/imgWidth,usableHeight/imgHeight);const finalWidth=imgWidth*scale;const finalHeight=imgHeight*scale;const xOffset=(pageWidth-finalWidth)/2;const yOffset=(pageHeight-finalHeight)/2;pdf.addImage(imgData,'PNG',xOffset,yOffset,finalWidth,finalHeight);pdf.save('stealth-board.pdf');URL.revokeObjectURL(url);};img.src=url;});
 </script>
 </body>
 </html>
