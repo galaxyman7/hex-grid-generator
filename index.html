@@ -66,6 +66,23 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    #message {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 5px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #message.show {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
@@ -82,6 +99,8 @@
 <svg id="hexMap"></svg>
 <button id="printBtn">Print / Export PDF</button>
 
+<div id="message"></div>
+
 <script>
   // ----------------------------
   // PeerJS P2P Setup with Sync
@@ -89,9 +108,9 @@
   let peer = null;
   let connections = [];
   let edgesMap = {};     // edgeId -> SVG line element
-  let edgeStates = {};   // local edges
+  let edgeStates = {};   // shared edges
   let myCircleStates = {};   // my highlights
-  let otherCircleStates = {}; // known highlights from opponent
+  let otherCircleStates = {}; // opponent highlights (private)
   let peerReady = false;
   let searchMode = false;
 
@@ -117,8 +136,8 @@
       connections.push(conn);
       conn.on('data', handleIncomingData);
 
-      // Send current circle state (my own highlights only)
-      conn.send({ type: "syncCircles", circles: myCircleStates });
+      // Send initial sync: edges (shared) + my circles (private to me)
+      conn.send({ type: "syncAll", edges: edgeStates, circles: myCircleStates });
     });
   }
 
@@ -129,10 +148,25 @@
   }
 
   function handleIncomingData(data) {
-    if (data.type === "syncCircles") {
+    if (data.type === "syncAll") {
+      // Sync edges (shared) and circles (opponent's private)
+      for (const edgeId in data.edges) {
+        edgeStates[edgeId] = data.edges[edgeId];
+        if (edgesMap[edgeId]) {
+          edgesMap[edgeId].setAttribute("stroke-width", data.edges[edgeId] ? "6" : "2");
+        }
+      }
       otherCircleStates = data.circles;
     }
+    if (data.type === "toggleEdge") {
+      const edge = edgesMap[data.edgeId];
+      if (edge) {
+        edge.setAttribute("stroke-width", data.highlighted ? "6" : "2");
+        edgeStates[data.edgeId] = data.highlighted;
+      }
+    }
     if (data.type === "toggleCircle") {
+      // Opponent toggled a circle (we only record, not show)
       otherCircleStates[data.circleId] = data.highlighted;
     }
   }
@@ -157,6 +191,16 @@
     });
     conn.on('data', handleIncomingData);
   });
+
+  // ----------------------------
+  // Floating message function
+  // ----------------------------
+  function showMessage(text) {
+    const messageDiv = document.getElementById('message');
+    messageDiv.textContent = text;
+    messageDiv.classList.add('show');
+    setTimeout(() => messageDiv.classList.remove('show'), 2000);
+  }
 
   // ----------------------------
   // Hex Grid Drawing
@@ -189,6 +233,57 @@
   svg.setAttribute('height', svgHeight);
 
   function createHex(x, y, label) {
+    // Points for hex corners
+    const points = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = Math.PI / 3 * i - Math.PI / 6;
+      const px = x + size * Math.cos(angle);
+      const py = y + size * Math.sin(angle);
+      points.push({ x: px, y: py });
+    }
+
+    // Draw edges (clickable, shared state)
+    for (let i = 0; i < 6; i++) {
+      const start = points[i];
+      const end = points[(i + 1) % 6];
+
+      const edge = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      edge.setAttribute("x1", start.x);
+      edge.setAttribute("y1", start.y);
+      edge.setAttribute("x2", end.x);
+      edge.setAttribute("y2", end.y);
+      edge.setAttribute("stroke", "#333");
+      edge.setAttribute("stroke-width", "2");
+
+      const edgeId = `${label}-edge-${i}`;
+      edge.dataset.edgeId = edgeId;
+      edgesMap[edgeId] = edge;
+      edgeStates[edgeId] = false;
+
+      svg.appendChild(edge);
+
+      // Clickable overlay
+      const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      hitbox.setAttribute("x1", start.x);
+      hitbox.setAttribute("y1", start.y);
+      hitbox.setAttribute("x2", end.x);
+      hitbox.setAttribute("y2", end.y);
+      hitbox.setAttribute("stroke", "transparent");
+      hitbox.setAttribute("stroke-width", "15");
+      hitbox.style.cursor = "pointer";
+
+      hitbox.addEventListener('click', () => {
+        const isHighlighted = edge.getAttribute("stroke-width") === "6";
+        const newHighlighted = !isHighlighted;
+        edge.setAttribute("stroke-width", newHighlighted ? "6" : "2");
+        edgeStates[edgeId] = newHighlighted;
+
+        broadcast({ type: "toggleEdge", edgeId, highlighted: newHighlighted });
+      });
+
+      svg.appendChild(hitbox);
+    }
+
     // Label inside hex
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.6);
@@ -196,7 +291,7 @@
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circle positions (evenly spaced circular pattern)
+    // Circles (evenly spaced around hex center)
     const circleColors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080'];
     const circleRadius = 22;
     const circleCount = circleColors.length;
@@ -219,14 +314,14 @@
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          // SEARCH MODE: Check opponent highlights only
+          // SEARCH MODE: check opponent highlights
           if (otherCircleStates[circleId]) {
-            alert("found!");
+            showMessage("found!");
           } else {
-            alert("nothing found");
+            showMessage("nothing found");
           }
         } else {
-          // PLACEMENT MODE: Toggle my own highlight
+          // PLACEMENT MODE: toggle my own highlight (not shared)
           const isHighlighted = circle.getAttribute("stroke") === "black";
           const newHighlighted = !isHighlighted;
           circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
@@ -296,3 +391,4 @@
 </script>
 </body>
 </html>
+
