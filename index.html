@@ -66,52 +66,51 @@
       border-radius: 5px;
       cursor: pointer;
     }
-   #message {
-  position: fixed;
-  bottom: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 15px 30px;
-  border-radius: 8px;
-  font-size: 20px;
-  font-weight: bold;
-  color: #fff;
-  opacity: 0;
-  pointer-events: none;
-}
 
-#message.show {
-  animation: slideFade 2s ease forwards;
-}
-
-#message.found {
-  background: rgba(0, 128, 0, 0.85);
-}
-#message.nothing {
-  background: rgba(200, 0, 0, 0.85);
-}
-#message.collision {
-  background: rgba(255, 140, 0, 0.85);
-}
-
-@keyframes slideFade {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, 0);
-  }
-  10% {
-    opacity: 1;
-    transform: translate(-50%, 10px);
-  }
-  80% {
-    opacity: 1;
-    transform: translate(-50%, 20px);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, 40px);
-  }
-}
+    /* Floating message with slide/fade animation */
+    #message {
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 20px;
+      font-weight: bold;
+      color: #fff;
+      opacity: 0;
+      pointer-events: none;
+    }
+    #message.show {
+      animation: slideFade 2s ease forwards;
+    }
+    #message.found {
+      background: rgba(0, 128, 0, 0.85);
+    }
+    #message.nothing {
+      background: rgba(200, 0, 0, 0.85);
+    }
+    #message.collision {
+      background: rgba(255, 140, 0, 0.85);
+    }
+    @keyframes slideFade {
+      0% {
+        opacity: 0;
+        transform: translate(-50%, 0);
+      }
+      10% {
+        opacity: 1;
+        transform: translate(-50%, 10px);
+      }
+      80% {
+        opacity: 1;
+        transform: translate(-50%, 20px);
+      }
+      100% {
+        opacity: 0;
+        transform: translate(-50%, 40px);
+      }
+    }
   </style>
 </head>
 <body>
@@ -294,66 +293,31 @@
       svg.appendChild(hitbox);
     }
 
-    // Label
+    // Label slightly higher to avoid overlap
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.6);
-    text.setAttribute("y", y - size * 0.6);
+    text.setAttribute("y", y - size * 0.7);
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circles - 3 blue on top, green bottom-left, red bottom-right
-const circlePositions = [
-  { color: '#add8e6', dx: -10, dy: -20 }, // left-top blue
-  { color: '#add8e6', dx:  10, dy: -20 }, // right-top blue
-  { color: '#add8e6', dx:   0, dy: -30 }, // center-top blue
-  { color: '#90ee90', dx: -10, dy:  15 }, // bottom-left green
-  { color: '#f08080', dx:  10, dy:  15 }  // bottom-right red
-];
+    // Circles: 3 blue on top, green bottom-left, red bottom-right
+    const circlePositions = [
+      { color: '#add8e6', dx: -10, dy: -20 }, // left-top blue
+      { color: '#add8e6', dx:  10, dy: -20 }, // right-top blue
+      { color: '#add8e6', dx:   0, dy: -30 }, // center-top blue
+      { color: '#90ee90', dx: -10, dy:  15 }, // bottom-left green
+      { color: '#f08080', dx:  10, dy:  15 }  // bottom-right red
+    ];
 
-circlePositions.forEach((pos, index) => {
-  const cx = x + pos.dx;
-  const cy = y + pos.dy;
-
-  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-  circle.setAttribute("cx", cx);
-  circle.setAttribute("cy", cy);
-  circle.setAttribute("r", 6);
-  circle.setAttribute("fill", pos.color);
-  circle.setAttribute("stroke", "transparent");
-  circle.setAttribute("stroke-width", "3");
-
-  const circleId = `${label}-circle-${index}`;
-  myCircleStates[circleId] = false;
-
-  circle.addEventListener('click', () => {
-    if (searchMode) {
-      if (otherCircleStates[circleId]) {
-        showMessage("Found!", "found");
-      } else {
-        showMessage("Nothing Found", "nothing");
-      }
-    } else {
-      const isHighlighted = circle.getAttribute("stroke") === "black";
-      const newHighlighted = !isHighlighted;
-      circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
-      myCircleStates[circleId] = newHighlighted;
-      broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
-
-      if (newHighlighted && otherCircleStates[circleId]) {
-        showMessage("Collision!", "collision");
-      }
-    }
-  });
-
-  svg.appendChild(circle);
-});
-
+    circlePositions.forEach((pos, index) => {
+      const cx = x + pos.dx;
+      const cy = y + pos.dy;
 
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", cx);
       circle.setAttribute("cy", cy);
       circle.setAttribute("r", 6);
-      circle.setAttribute("fill", color);
+      circle.setAttribute("fill", pos.color);
       circle.setAttribute("stroke", "transparent");
       circle.setAttribute("stroke-width", "3");
 
@@ -362,21 +326,18 @@ circlePositions.forEach((pos, index) => {
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          // Search mode
           if (otherCircleStates[circleId]) {
             showMessage("Found!", "found");
           } else {
             showMessage("Nothing Found", "nothing");
           }
         } else {
-          // Placement mode
           const isHighlighted = circle.getAttribute("stroke") === "black";
           const newHighlighted = !isHighlighted;
           circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
           myCircleStates[circleId] = newHighlighted;
           broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
 
-          // Check collision
           if (newHighlighted && otherCircleStates[circleId]) {
             showMessage("Collision!", "collision");
           }
