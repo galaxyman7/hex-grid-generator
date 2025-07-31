@@ -68,20 +68,30 @@
     }
     #message {
       position: fixed;
-      bottom: 20px;
+      bottom: 40px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0,0,0,0.8);
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 20px;
+      font-weight: bold;
       color: #fff;
-      padding: 8px 16px;
-      border-radius: 5px;
-      font-size: 14px;
+      background: rgba(0,0,0,0.8);
       opacity: 0;
       transition: opacity 0.3s ease;
       pointer-events: none;
     }
     #message.show {
       opacity: 1;
+    }
+    #message.found {
+      background: rgba(0, 128, 0, 0.85);
+    }
+    #message.nothing {
+      background: rgba(200, 0, 0, 0.85);
+    }
+    #message.collision {
+      background: rgba(255, 140, 0, 0.85);
     }
   </style>
 </head>
@@ -102,19 +112,16 @@
 <div id="message"></div>
 
 <script>
-  // ----------------------------
-  // PeerJS P2P Setup with Sync
-  // ----------------------------
   let peer = null;
   let connections = [];
-  let edgesMap = {};     // edgeId -> SVG line element
-  let edgeStates = {};   // shared edges
-  let myCircleStates = {};   // my highlights
-  let otherCircleStates = {}; // opponent highlights (private)
+  let edgesMap = {};     
+  let edgeStates = {};   
+  let myCircleStates = {};   
+  let otherCircleStates = {}; 
   let peerReady = false;
   let searchMode = false;
 
-  // Generate short 4-char session code
+  // Generate short session code
   function generateShortCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
@@ -135,8 +142,6 @@
     peer.on('connection', (conn) => {
       connections.push(conn);
       conn.on('data', handleIncomingData);
-
-      // Send initial sync: edges (shared) + my circles (private to me)
       conn.send({ type: "syncAll", edges: edgeStates, circles: myCircleStates });
     });
   }
@@ -149,7 +154,6 @@
 
   function handleIncomingData(data) {
     if (data.type === "syncAll") {
-      // Sync edges (shared) and circles (opponent's private)
       for (const edgeId in data.edges) {
         edgeStates[edgeId] = data.edges[edgeId];
         if (edgesMap[edgeId]) {
@@ -166,14 +170,19 @@
       }
     }
     if (data.type === "toggleCircle") {
-      // Opponent toggled a circle (we only record, not show)
       otherCircleStates[data.circleId] = data.highlighted;
     }
   }
 
-  // ----------------------------
-  // Session Controls
-  // ----------------------------
+  // Floating message
+  function showMessage(text, type) {
+    const messageDiv = document.getElementById('message');
+    messageDiv.textContent = text;
+    messageDiv.className = ''; // reset classes
+    messageDiv.classList.add('show', type);
+    setTimeout(() => messageDiv.classList.remove('show', type), 2000);
+  }
+
   document.getElementById('createSessionBtn').addEventListener('click', () => {
     if (!peerReady) return alert("Peer not ready yet. Please wait a second.");
     document.getElementById('sessionInfo').textContent = `Your Session Code: ${peer.id}`;
@@ -192,19 +201,6 @@
     conn.on('data', handleIncomingData);
   });
 
-  // ----------------------------
-  // Floating message function
-  // ----------------------------
-  function showMessage(text) {
-    const messageDiv = document.getElementById('message');
-    messageDiv.textContent = text;
-    messageDiv.classList.add('show');
-    setTimeout(() => messageDiv.classList.remove('show'), 2000);
-  }
-
-  // ----------------------------
-  // Hex Grid Drawing
-  // ----------------------------
   const svg = document.getElementById('hexMap');
   const size = 60;
   const marginInches = 0.5;
@@ -233,7 +229,6 @@
   svg.setAttribute('height', svgHeight);
 
   function createHex(x, y, label) {
-    // Points for hex corners
     const points = [];
     for (let i = 0; i < 6; i++) {
       const angle = Math.PI / 3 * i - Math.PI / 6;
@@ -242,7 +237,7 @@
       points.push({ x: px, y: py });
     }
 
-    // Draw edges (clickable, shared state)
+    // Outer edges
     for (let i = 0; i < 6; i++) {
       const start = points[i];
       const end = points[(i + 1) % 6];
@@ -256,13 +251,10 @@
       edge.setAttribute("stroke-width", "2");
 
       const edgeId = `${label}-edge-${i}`;
-      edge.dataset.edgeId = edgeId;
       edgesMap[edgeId] = edge;
       edgeStates[edgeId] = false;
-
       svg.appendChild(edge);
 
-      // Clickable overlay
       const hitbox = document.createElementNS("http://www.w3.org/2000/svg", "line");
       hitbox.setAttribute("x1", start.x);
       hitbox.setAttribute("y1", start.y);
@@ -277,27 +269,28 @@
         const newHighlighted = !isHighlighted;
         edge.setAttribute("stroke-width", newHighlighted ? "6" : "2");
         edgeStates[edgeId] = newHighlighted;
-
         broadcast({ type: "toggleEdge", edgeId, highlighted: newHighlighted });
       });
 
       svg.appendChild(hitbox);
     }
 
-    // Label inside hex
+    // Label
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
     text.setAttribute("x", x - size * 0.6);
     text.setAttribute("y", y - size * 0.6);
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circles (evenly spaced around hex center)
-    const circleColors = ['#add8e6', '#add8e6', '#add8e6', '#90ee90', '#f08080'];
+    // Circles - blue top 3
+    const circleColors = ['#add8e6','#add8e6','#add8e6','#90ee90','#f08080']; 
     const circleRadius = 22;
     const circleCount = circleColors.length;
 
+    // Arrange so blue are top positions
+    const angleOffset = -Math.PI / 2; // top
     circleColors.forEach((color, index) => {
-      const angle = (2 * Math.PI / circleCount) * index - Math.PI / 2;
+      const angle = (2 * Math.PI / circleCount) * index + angleOffset;
       const cx = x + circleRadius * Math.cos(angle);
       const cy = y + circleRadius * Math.sin(angle);
 
@@ -314,20 +307,24 @@
 
       circle.addEventListener('click', () => {
         if (searchMode) {
-          // SEARCH MODE: check opponent highlights
+          // Search mode
           if (otherCircleStates[circleId]) {
-            showMessage("found!");
+            showMessage("Found!", "found");
           } else {
-            showMessage("nothing found");
+            showMessage("Nothing Found", "nothing");
           }
         } else {
-          // PLACEMENT MODE: toggle my own highlight (not shared)
+          // Placement mode
           const isHighlighted = circle.getAttribute("stroke") === "black";
           const newHighlighted = !isHighlighted;
           circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
           myCircleStates[circleId] = newHighlighted;
-
           broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
+
+          // Check collision
+          if (newHighlighted && otherCircleStates[circleId]) {
+            showMessage("Collision!", "collision");
+          }
         }
       });
 
@@ -335,7 +332,7 @@
     });
   }
 
-  // Generate grid
+  // Build grid
   for (let row = 0; row < rows; row++) {
     const rowLetter = String.fromCharCode(65 + (row % 26));
     for (let col = 0; col < cols; col++) {
@@ -347,7 +344,7 @@
     }
   }
 
-  // Toggle search mode button
+  // Toggle search mode
   const searchToggle = document.getElementById('searchToggle');
   searchToggle.addEventListener('click', () => {
     searchMode = !searchMode;
@@ -391,4 +388,3 @@
 </script>
 </body>
 </html>
-
