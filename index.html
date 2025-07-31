@@ -66,33 +66,52 @@
       border-radius: 5px;
       cursor: pointer;
     }
-    #message {
-      position: fixed;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 15px 30px;
-      border-radius: 8px;
-      font-size: 20px;
-      font-weight: bold;
-      color: #fff;
-      background: rgba(0,0,0,0.8);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
-    }
-    #message.show {
-      opacity: 1;
-    }
-    #message.found {
-      background: rgba(0, 128, 0, 0.85);
-    }
-    #message.nothing {
-      background: rgba(200, 0, 0, 0.85);
-    }
-    #message.collision {
-      background: rgba(255, 140, 0, 0.85);
-    }
+   #message {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 15px 30px;
+  border-radius: 8px;
+  font-size: 20px;
+  font-weight: bold;
+  color: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#message.show {
+  animation: slideFade 2s ease forwards;
+}
+
+#message.found {
+  background: rgba(0, 128, 0, 0.85);
+}
+#message.nothing {
+  background: rgba(200, 0, 0, 0.85);
+}
+#message.collision {
+  background: rgba(255, 140, 0, 0.85);
+}
+
+@keyframes slideFade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 10px);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 20px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 40px);
+  }
+}
   </style>
 </head>
 <body>
@@ -282,17 +301,53 @@
     text.textContent = label;
     svg.appendChild(text);
 
-    // Circles - blue top 3
-    const circleColors = ['#add8e6','#add8e6','#add8e6','#90ee90','#f08080']; 
-    const circleRadius = 22;
-    const circleCount = circleColors.length;
+    // Circles - 3 blue on top, green bottom-left, red bottom-right
+const circlePositions = [
+  { color: '#add8e6', dx: -10, dy: -20 }, // left-top blue
+  { color: '#add8e6', dx:  10, dy: -20 }, // right-top blue
+  { color: '#add8e6', dx:   0, dy: -30 }, // center-top blue
+  { color: '#90ee90', dx: -10, dy:  15 }, // bottom-left green
+  { color: '#f08080', dx:  10, dy:  15 }  // bottom-right red
+];
 
-    // Arrange so blue are top positions
-    const angleOffset = -Math.PI / 2; // top
-    circleColors.forEach((color, index) => {
-      const angle = (2 * Math.PI / circleCount) * index + angleOffset;
-      const cx = x + circleRadius * Math.cos(angle);
-      const cy = y + circleRadius * Math.sin(angle);
+circlePositions.forEach((pos, index) => {
+  const cx = x + pos.dx;
+  const cy = y + pos.dy;
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", cx);
+  circle.setAttribute("cy", cy);
+  circle.setAttribute("r", 6);
+  circle.setAttribute("fill", pos.color);
+  circle.setAttribute("stroke", "transparent");
+  circle.setAttribute("stroke-width", "3");
+
+  const circleId = `${label}-circle-${index}`;
+  myCircleStates[circleId] = false;
+
+  circle.addEventListener('click', () => {
+    if (searchMode) {
+      if (otherCircleStates[circleId]) {
+        showMessage("Found!", "found");
+      } else {
+        showMessage("Nothing Found", "nothing");
+      }
+    } else {
+      const isHighlighted = circle.getAttribute("stroke") === "black";
+      const newHighlighted = !isHighlighted;
+      circle.setAttribute("stroke", newHighlighted ? "black" : "transparent");
+      myCircleStates[circleId] = newHighlighted;
+      broadcast({ type: "toggleCircle", circleId, highlighted: newHighlighted });
+
+      if (newHighlighted && otherCircleStates[circleId]) {
+        showMessage("Collision!", "collision");
+      }
+    }
+  });
+
+  svg.appendChild(circle);
+});
+
 
       const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       circle.setAttribute("cx", cx);
